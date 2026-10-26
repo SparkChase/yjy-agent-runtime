@@ -18,7 +18,7 @@ from yjy_agent_runtime.domain import (
     ToolResultStatus,
 )
 
-from .memory import SessionNotFoundError
+from .in_memory import SessionNotFoundError
 
 
 class SessionStorageError(RuntimeError):
