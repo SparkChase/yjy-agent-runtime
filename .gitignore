@@ -3,6 +3,8 @@ __pycache__/
 *.py[cod]
 *$py.class
 .pytest_cache/
+# 禁止写系统临时目录的环境里，pytest 用的本地 basetemp
+.pytest-tmp/
 .mypy_cache/
 .ruff_cache/
 .coverage
