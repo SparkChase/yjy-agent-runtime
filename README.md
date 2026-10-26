@@ -23,7 +23,7 @@ YJY Agent Runtime 是一个从零实现的最小 Agent Runtime 教学项目。�
 - 工具系统：注册表、唯一名称、JSON Schema 参数校验、未知工具、异常结果、结果大小限制，以及 `calculator`、mock `search`、Session-scoped `todo` 和 `echo`。
 - Session：消息、工具交互、待办和摘要元数据按 `session_id` 隔离；支持进程内存储和 JSON 文件恢复。
 - Context：系统约束、工具定义、最近历史、工具结果预算和增量历史摘要。
-- Trace：`session_id`、`run_id`、`trace_id`、轮次、LLM/工具耗时、终止原因和递归敏感字段脱敏。
+- Trace：`session_id`、`run_id`、`trace_id`、轮次、LLM/工具耗时、工具参数与结果摘要、终止原因，支持 JSONL 落盘和递归敏感字段脱敏。
 - OpenAI Chat Completions 兼容适配器：从环境变量读取配置，区分网络、服务和响应解析错误。
 - CLI 入口：`yjy-agent-runtime`。
 
@@ -76,22 +76,31 @@ uv sync --locked
 LLM_BASE_URL=https://your-llm-provider.example/v1
 LLM_MODEL=your-model-name
 LLM_API_KEY=your-api-key
-LLM_TIMEOUT_SECONDS=30
+LLM_TIMEOUT_SECONDS=120
+LLM_CONNECT_TIMEOUT_SECONDS=10
 YJY_SESSION_DIR=.yjy-sessions
+YJY_TRACE_DIR=logs
 ```
 
 真实密钥只能通过本地环境变量或未跟踪配置注入，不能写入代码、日志、测试快照或 Git 历史。
 
-运行一次对话：
+CLI 默认自动读取当前目录的 `.env`，因此把上面的变量写进 `.env` 后可直接运行；
+显式环境变量优先于文件。也可用 `--env-file <path>` 指定文件，或 `--no-env-file`
+完全关闭加载。
 
 ```bash
-export LLM_BASE_URL="https://your-llm-provider.example/v1"
-export LLM_MODEL="your-model-name"
-export LLM_API_KEY="your-api-key"
+# .env 中已有配置时，无需 export
 YJY_SESSION_DIR=.yjy-sessions uv run yjy-agent-runtime --session-id demo "请计算 6 * 7，并把结果记入 todo"
 ```
 
 单次运行的轮次上限可通过 `--max-iterations` 设置，默认值为 8。
+
+每次运行都会把脱敏后的运行轨迹写入 JSONL。默认路径为 `logs/<session-id>.jsonl`，
+可用 `--trace-file <path>` 指定，或用 `--no-trace` 关闭。CLI 在 stderr 打印实际路径。
+
+```bash
+uv run yjy-agent-runtime --session-id demo --trace-file logs/demo.jsonl "列出我的待办"
+```
 
 也可以省略消息参数，让 CLI 从 stdin 读取：
 

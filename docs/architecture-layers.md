@@ -44,17 +44,43 @@ interfaces ──► infrastructure ──► agent ──► domain
 | 子包 | 实现 | 关键文件 |
 | --- | --- | --- |
 | `llm/` | OpenAI Chat Completions 兼容适配器，解析 JSON 决策 | `openai_compatible.py` |
-| `session/` | 进程内 Store 与 JSON 文件 Store，按 `session_id` 隔离 | `memory.py`、`file.py` |
+| `session/` | 进程内 Store 与 JSON 文件 Store，按 `session_id` 隔离 | `in_memory.py`、`file.py` |
 | `tools/` | 工具注册表、参数校验、超时执行和内置工具 | `registry.py`、`executor.py`、`builtin.py` |
 | `context/` | 组装模型输入，做历史摘要与预算裁剪 | `builder.py` |
-| `trace/` | 结构化事件与递归脱敏 | `memory.py` |
+| `trace/` | 结构化事件、递归脱敏与 JSONL 落盘 | `redaction.py`、`in_memory.py`、`jsonl.py`、`fanout.py` |
 
 基建层实现应用层端口，可以依赖 `agent` 与 `domain`，但相互之间不横向耦合，也不被
 `agent` 反向依赖。
 
+### 逐文件职责速查
+
+按阅读顺序列出每个文件"干什么、为什么存在"，方便逐行对照源码。
+
+领域层 `domain/`：
+- `models.py`：全部不可变领域对象与受控枚举，附带构造期不变量校验。
+
+应用层 `agent/`：
+- `loop.py`：`AgentLoop` 线性循环与 `LoopConfig` 安全边界，编排一轮运行。
+- `ports.py`：能力协议（Context/LLM/Tool/Session/Trace/History）与工具契约
+  `ToolDefinition`、`Tool`。
+
+基建层 `infrastructure/`：
+- `llm/openai_compatible.py`：HTTP 适配器、配置读取、分阶段超时、决策 JSON 解析。
+- `session/in_memory.py`：进程内 SessionStore 与 `SessionNotFoundError`。
+- `session/file.py`：JSON 文件 SessionStore、原子替换与 `SessionStorageError`。
+- `tools/registry.py`：按唯一名称保存工具、查找、导出定义视图。
+- `tools/executor.py`：参数 Schema 校验、超时执行、结构化成功/失败结果。
+- `tools/builtin.py`：`echo`、`calculator`、mock `search`、Session 级 `todo`。
+- `context/builder.py`：`ContextConfig`、抽取式摘要器与 `ContextBuilder`。
+- `trace/redaction.py`：敏感字段脱敏规则，内存版与文件版共用。
+- `trace/in_memory.py`：进程内 Recorder，事件留在内存供测试与调试。
+- `trace/jsonl.py`：JSONL 落盘 Recorder 与 `TraceWriteError`。
+- `trace/fanout.py`：把一条事件同时送给内存与文件 Recorder。
+
 ### 入口层 `interfaces/`
 
-- `cli.py` 解析参数、加载配置、装配具体实现、调用 `AgentLoop`、输出结果与错误。
+- `config.py`：`.env` 解析与注入，显式环境变量优先。
+- `cli.py`：`TraceSink`、参数解析、装配具体实现、调用 `AgentLoop`、输出结果与错误。
 - 只有入口层知道"具体用哪个 Store、哪个 LLM 客户端"。换一个入口（HTTP 服务或
   交互式命令行）复用的是同一套 `agent` 与 `infrastructure`。
 
