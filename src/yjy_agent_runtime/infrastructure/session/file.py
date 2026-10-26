@@ -20,6 +20,12 @@ from yjy_agent_runtime.domain import (
 )
 
 from .in_memory import SessionNotFoundError
+from .invariants import (
+    assert_tool_interactions_consistent,
+    ensure_unique_call_id,
+    reject_standalone_tool_message,
+    validate_tool_interaction,
+)
 
 
 class SessionStorageError(RuntimeError):
@@ -42,13 +48,22 @@ class JsonFileSessionStore:
         with self._lock:
             try:
                 payload = json.loads(path.read_text(encoding="utf-8"))
-                return self._decode_session(payload, expected_id=session_id)
+                session = self._decode_session(payload, expected_id=session_id)
             except SessionStorageError:
                 raise
             except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError) as error:
                 raise SessionStorageError(
                     f"session snapshot is corrupted: {session_id}"
                 ) from error
+            # 读取时再做一次一致性检查：旧版本可能留下过“半条工具交互”的快照，
+            # 这种历史一旦进入 Context，模型会看到有结果没调用、或有调用没结果。
+            try:
+                assert_tool_interactions_consistent(session)
+            except ValueError as error:
+                raise SessionStorageError(
+                    f"session snapshot has an incomplete tool interaction: {session_id}"
+                ) from error
+            return session
 
     def get_or_create(self, session_id: str) -> Session:
         current = self.get(session_id)
@@ -59,6 +74,7 @@ class JsonFileSessionStore:
         return session
 
     def append_message(self, session_id: str, message: Message) -> Session:
+        reject_standalone_tool_message(message)
         current = self._require(session_id)
         updated = Session(
             session_id=session_id,
@@ -76,13 +92,21 @@ class JsonFileSessionStore:
         session_id: str,
         call: ToolCall,
         result: ToolResult,
+        message: Message,
     ) -> Session:
-        if call.call_id != result.call_id or call.name != result.tool_name:
-            raise ValueError("tool call and result must refer to the same interaction")
+        """用一次原子替换写入调用、结果和工具消息。
+
+        三者进入同一个 ``Session`` 快照，再交给 ``_save`` 做"临时文件 + fsync +
+        os.replace"。进程在任意时刻崩溃，磁盘上要么是写入前的完整快照，要么是
+        写入后的完整快照，不会出现只有其中一部分的半条交互。
+        """
+
+        validate_tool_interaction(call, result, message)
         current = self._require(session_id)
+        ensure_unique_call_id(current, call)
         updated = Session(
             session_id=session_id,
-            messages=current.messages,
+            messages=(*current.messages, message),
             tool_calls=(*current.tool_calls, call),
             tool_results=(*current.tool_results, result),
             todos=current.todos,

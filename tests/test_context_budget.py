@@ -170,8 +170,12 @@ def test_tool_result_cannot_bypass_budget_through_summary() -> None:
         ToolResultStatus.SUCCESS,
         "x" * 5_000,
     )
-    store.append_tool_interaction("session-a", call, result)
-    store.append_message("session-a", Message(MessageRole.TOOL, result.content, "call-1"))
+    store.append_tool_interaction(
+        "session-a",
+        call,
+        result,
+        Message(MessageRole.TOOL, result.content, call.call_id),
+    )
     for index in range(6):
         store.append_message(
             "session-a",
@@ -210,8 +214,12 @@ def test_tool_message_renders_structured_envelope_with_redaction() -> None:
         ToolResultStatus.SUCCESS,
         json.dumps({"ok": True, "token": "should-not-leak"}),
     )
-    store.append_tool_interaction("session-a", call, result)
-    store.append_message("session-a", Message(MessageRole.TOOL, result.content, "call-1"))
+    store.append_tool_interaction(
+        "session-a",
+        call,
+        result,
+        Message(MessageRole.TOOL, result.content, call.call_id),
+    )
     builder = ContextBuilder(store)
 
     messages = builder.build(RunRequest("session-a", "继续"), ())
@@ -246,9 +254,10 @@ def test_tool_envelope_preserves_error_type_and_multiple_calls() -> None:
         error_type="UnknownToolError",
     )
     for call, result in ((ok_call, ok_result), (failed_call, failed_result)):
-        store.append_tool_interaction("session-a", call, result)
-        store.append_message(
+        store.append_tool_interaction(
             "session-a",
+            call,
+            result,
             Message(MessageRole.TOOL, result.content, result.call_id),
         )
     builder = ContextBuilder(store)
@@ -268,7 +277,14 @@ def test_tool_envelope_does_not_import_other_session_results() -> None:
     store = InMemorySessionStore()
     store.get_or_create("session-a")
     store.get_or_create("session-b")
-    store.append_message("session-a", Message(MessageRole.TOOL, "本地结果", "call-1"))
+    call = ToolCall("call-1", "echo", {"text": "本地"})
+    local = ToolResult("call-1", "echo", ToolResultStatus.SUCCESS, "本地结果")
+    store.append_tool_interaction(
+        "session-a",
+        call,
+        local,
+        Message(MessageRole.TOOL, local.content, call.call_id),
+    )
     foreign = ToolResult(
         "call-1",
         "echo",
@@ -282,6 +298,7 @@ def test_tool_envelope_does_not_import_other_session_results() -> None:
     )
 
     assert "来自其它 Session 的结果" not in messages[-1].content
+    assert "本地结果" in messages[-1].content
 
 
 def test_context_config_rejects_non_positive_budgets() -> None:

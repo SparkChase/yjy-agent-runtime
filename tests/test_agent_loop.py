@@ -197,6 +197,41 @@ def test_loop_supports_multiple_tool_calls_in_one_decision() -> None:
     assert [item.content for item in context.seen_results[1]] == ["42", "42"]
 
 
+def test_loop_persists_each_tool_interaction_as_one_complete_record() -> None:
+    """一次工具调用只产生一组完整的"调用 + 结果 + 工具消息"。
+
+    Store 已禁止单独追加 TOOL 消息，所以这个测试同时守住两件事：循环确实只写
+    一次，且历史里不会出现半条交互。
+    """
+
+    call = ToolCall("call-1", "calculator", {"expression": "6 * 7"})
+    store = InMemorySessionStore()
+    loop = AgentLoop(
+        context_provider=StubContextProvider(),
+        llm_client=FakeLLMClient(
+            [
+                ToolCallDecision((call,)),
+                FinalAnswerDecision(answer="结果是 42。"),
+            ]
+        ),
+        session_store=store,
+        tool_executor=StubToolExecutor(),
+        trace_recorder=InMemoryTraceRecorder(),
+    )
+
+    loop.run(RunRequest("session-a", "计算 6 * 7"))
+
+    session = store.get_or_create("session-a")
+    tool_messages = [
+        message for message in session.messages if message.role is MessageRole.TOOL
+    ]
+    assert session.tool_calls == (call,)
+    assert len(session.tool_results) == 1
+    assert len(tool_messages) == 1
+    assert tool_messages[0].tool_call_id == call.call_id
+    assert tool_messages[0].content == session.tool_results[0].content
+
+
 def test_loop_stops_at_max_iterations() -> None:
     first = ToolCall("call-1", "calculator")
     second = ToolCall("call-2", "calculator")

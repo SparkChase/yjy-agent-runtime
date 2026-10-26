@@ -2,7 +2,7 @@
 
 import pytest
 
-from yjy_agent_runtime.domain import Message, MessageRole, RunRequest
+from yjy_agent_runtime.domain import Message, MessageRole, RunRequest, Session
 from yjy_agent_runtime.infrastructure.context import ContextBuilder, ContextConfig
 from yjy_agent_runtime.infrastructure.session import InMemorySessionStore
 from yjy_agent_runtime.infrastructure.tools import ToolDefinition
@@ -189,15 +189,31 @@ def test_builder_injects_tool_definitions_into_system_constraint() -> None:
     assert '"has_side_effects": false' in messages[0].content
 
 
+class StaticSessionStore:
+    """返回一份手写快照。
+
+    Session 的写入 API 已不允许“只有工具消息、没有结构化结果”的状态（见
+    ``tests/test_session_store.py``）。这里直接提供一份历史快照，专门覆盖
+    ContextBuilder 对旧数据/外部快照的兼容渲染路径。
+    """
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def get(self, session_id: str) -> Session | None:
+        return self._session if session_id == self._session.session_id else None
+
+    def set_summary(self, session_id: str, summary: object) -> Session:
+        raise AssertionError(f"unexpected summary write: {session_id} {summary}")
+
+
 def test_builder_limits_stored_tool_result_for_model_context() -> None:
-    store = InMemorySessionStore()
-    store.get_or_create("session-a")
-    store.append_message(
-        "session-a",
-        Message(MessageRole.TOOL, "x" * 100, "call-1"),
+    session = Session(
+        session_id="session-a",
+        messages=(Message(MessageRole.TOOL, "x" * 100, "call-1"),),
     )
     builder = ContextBuilder(
-        store,
+        StaticSessionStore(session),
         config=ContextConfig(max_tool_result_chars=20),
     )
 

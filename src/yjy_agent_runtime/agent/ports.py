@@ -117,7 +117,11 @@ class SessionStore(Protocol):
         ...
 
     def append_message(self, session_id: str, message: Message) -> Session:
-        """向已存在的 Session 追加消息并返回新快照。"""
+        """向已存在的 Session 追加非工具消息并返回新快照。
+
+        TOOL 消息不允许单独追加：它必须和对应的调用、结果一起通过
+        ``append_tool_interaction`` 写入，否则历史里会出现半条交互。
+        """
         ...
 
     def append_tool_interaction(
@@ -125,8 +129,12 @@ class SessionStore(Protocol):
         session_id: str,
         call: ToolCall,
         result: ToolResult,
+        message: Message,
     ) -> Session:
-        """原子追加相互关联的工具调用和结果。"""
+        """一次写入完整工具交互：调用、结果和对应的 TOOL 消息。
+
+        实现必须保证这次更新是原子的：要么三者全部可见，要么全部不可见。
+        """
         ...
 
     def set_summary(

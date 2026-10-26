@@ -244,20 +244,13 @@ class AgentLoop:
                         duration_ms=self._duration_ms(tool_started),
                     )
                 tool_results.append(tool_result)
-                # 4. 工具交互写两次，各自服务不同读者：
-                #    - append_tool_interaction：结构化的 call/result，供审计与
-                #      Context 组装“工具信封”；
-                #    - append_message(TOOL)：纯文本结果，供模型对话历史使用。
-                #    两次写之间若进程中断，会留下半条交互。这是当前版本的已知
-                #    边界（见 docs/runtime-remediation-plan.md 的 P2-01），
-                #    不影响单进程内的一次完整运行。
+                # 4. 一次工具交互必须在同一次写入里落盘：调用、结果和 TOOL 消息
+                #    三者是同一件事。分成两次写，进程在中间崩溃就会留下"有结果
+                #    没消息"的半条交互，模型看到的历史会自相矛盾。
                 self._session_store.append_tool_interaction(
                     request.session_id,
                     call,
                     tool_result,
-                )
-                self._session_store.append_message(
-                    request.session_id,
                     Message(
                         MessageRole.TOOL,
                         tool_result.content,

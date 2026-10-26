@@ -40,12 +40,17 @@ def test_different_sessions_keep_messages_and_tool_data_isolated() -> None:
     )
 
     store.append_message("session-a", Message(MessageRole.USER, "A 的消息"))
-    store.append_tool_interaction("session-a", call, result)
+    store.append_tool_interaction(
+        "session-a",
+        call,
+        result,
+        Message(MessageRole.TOOL, result.content, call.call_id),
+    )
     store.append_message("session-b", Message(MessageRole.USER, "B 的消息"))
 
     session_a = store.get_or_create("session-a")
     session_b = store.get_or_create("session-b")
-    assert [item.content for item in session_a.messages] == ["A 的消息"]
+    assert [item.content for item in session_a.messages] == ["A 的消息", "仅属于 A"]
     assert session_a.tool_calls == (call,)
     assert session_a.tool_results == (result,)
     assert [item.content for item in session_b.messages] == ["B 的消息"]
@@ -101,6 +106,91 @@ def test_tool_call_and_result_must_match() -> None:
     )
 
     with pytest.raises(ValueError, match="same interaction"):
-        store.append_tool_interaction("session-a", call, wrong_result)
+        store.append_tool_interaction(
+            "session-a",
+            call,
+            wrong_result,
+            Message(MessageRole.TOOL, "unexpected", "call-1"),
+        )
 
     assert store.get_or_create("session-a").tool_calls == ()
+
+
+def test_tool_interaction_writes_call_result_and_message_together() -> None:
+    store = InMemorySessionStore()
+    store.get_or_create("session-a")
+    call = ToolCall("call-1", "echo", {"text": "hi"})
+    result = ToolResult("call-1", "echo", ToolResultStatus.SUCCESS, "hi")
+
+    updated = store.append_tool_interaction(
+        "session-a",
+        call,
+        result,
+        Message(MessageRole.TOOL, result.content, call.call_id),
+    )
+
+    assert updated.tool_calls == (call,)
+    assert updated.tool_results == (result,)
+    assert updated.messages[-1].tool_call_id == "call-1"
+
+
+def test_standalone_tool_message_is_rejected() -> None:
+    store = InMemorySessionStore()
+    store.get_or_create("session-a")
+
+    with pytest.raises(ValueError, match="together with their tool interaction"):
+        store.append_message(
+            "session-a",
+            Message(MessageRole.TOOL, "半条交互", "call-1"),
+        )
+
+    assert store.get_or_create("session-a").messages == ()
+
+
+def test_tool_interaction_message_must_describe_the_same_call() -> None:
+    store = InMemorySessionStore()
+    store.get_or_create("session-a")
+    call = ToolCall("call-1", "echo")
+    result = ToolResult("call-1", "echo", ToolResultStatus.SUCCESS, "hi")
+
+    with pytest.raises(ValueError, match="same call id"):
+        store.append_tool_interaction(
+            "session-a",
+            call,
+            result,
+            Message(MessageRole.TOOL, result.content, "call-2"),
+        )
+    with pytest.raises(ValueError, match="must match the tool result"):
+        store.append_tool_interaction(
+            "session-a",
+            call,
+            result,
+            Message(MessageRole.TOOL, "别的结果", "call-1"),
+        )
+
+    assert store.get_or_create("session-a").tool_calls == ()
+
+
+def test_duplicate_tool_call_id_is_rejected() -> None:
+    store = InMemorySessionStore()
+    store.get_or_create("session-a")
+    call = ToolCall("call-1", "echo")
+    result = ToolResult("call-1", "echo", ToolResultStatus.SUCCESS, "hi")
+    store.append_tool_interaction(
+        "session-a",
+        call,
+        result,
+        Message(MessageRole.TOOL, result.content, call.call_id),
+    )
+
+    with pytest.raises(ValueError, match="already exists"):
+        store.append_tool_interaction(
+            "session-a",
+            call,
+            result,
+            Message(MessageRole.TOOL, result.content, call.call_id),
+        )
+
+    session = store.get_or_create("session-a")
+    assert len(session.tool_calls) == 1
+    assert len(session.messages) == 1

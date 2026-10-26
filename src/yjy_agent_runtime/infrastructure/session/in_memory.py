@@ -10,6 +10,12 @@ from yjy_agent_runtime.domain import (
     ToolResult,
 )
 
+from .invariants import (
+    ensure_unique_call_id,
+    reject_standalone_tool_message,
+    validate_tool_interaction,
+)
+
 
 class SessionNotFoundError(LookupError):
     """请求更新一个尚未创建的 Session。"""
@@ -37,6 +43,7 @@ class InMemorySessionStore:
             return session
 
     def append_message(self, session_id: str, message: Message) -> Session:
+        reject_standalone_tool_message(message)
         with self._lock:
             current = self._require(session_id)
             updated = Session(
@@ -55,16 +62,21 @@ class InMemorySessionStore:
         session_id: str,
         call: ToolCall,
         result: ToolResult,
+        message: Message,
     ) -> Session:
-        if call.call_id != result.call_id or call.name != result.tool_name:
-            raise ValueError(
-                "tool call and result must refer to the same interaction"
-            )
+        """一次快照更新同时写入调用、结果和工具消息。
+
+        内存里换的是整个不可变快照，所以这次替换天然原子：要么三者都可见，
+        要么三者都不变。
+        """
+
+        validate_tool_interaction(call, result, message)
         with self._lock:
             current = self._require(session_id)
+            ensure_unique_call_id(current, call)
             updated = Session(
                 session_id=session_id,
-                messages=current.messages,
+                messages=(*current.messages, message),
                 tool_calls=(*current.tool_calls, call),
                 tool_results=(*current.tool_results, result),
                 todos=current.todos,
