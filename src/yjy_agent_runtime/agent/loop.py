@@ -1,5 +1,6 @@
 """最小线性 Agent Loop。"""
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from time import perf_counter
@@ -26,10 +27,14 @@ class LoopConfig:
     """Agent Loop 的安全边界配置。"""
 
     max_iterations: int = 8
+    # Trace 中单条属性值的字符上限，避免把整段工具输出写进日志。
+    max_trace_value_chars: int = 500
 
     def __post_init__(self) -> None:
         if self.max_iterations < 1:
             raise ValueError("max_iterations must be at least 1")
+        if self.max_trace_value_chars < 1:
+            raise ValueError("max_trace_value_chars must be at least 1")
 
 
 class AgentLoop:
@@ -91,6 +96,7 @@ class AgentLoop:
                 trace_id=trace_id,
                 iteration=iteration,
                 message_count=len(messages),
+                prompt_chars=self._prompt_chars(messages),
             )
 
             llm_started = perf_counter()
@@ -182,6 +188,7 @@ class AgentLoop:
                     iteration=iteration,
                     call_id=call.call_id,
                     tool_name=call.name,
+                    arguments=dict(call.arguments),
                 )
                 try:
                     tool_result = self._tool_executor.execute(
@@ -224,6 +231,7 @@ class AgentLoop:
                     status=tool_result.status.value,
                     error_type=tool_result.error_type,
                     duration_ms=self._duration_ms(tool_started),
+                    result_summary=self._summarize(tool_result.content),
                 )
 
         result = RunResult(
@@ -312,3 +320,20 @@ class AgentLoop:
     @staticmethod
     def _duration_ms(started_at: float) -> float:
         return round((perf_counter() - started_at) * 1000, 3)
+
+    @staticmethod
+    def _prompt_chars(messages: Sequence[Message]) -> int:
+        """统计本轮发送给模型的内容字符数，用于观察 Context 预算。"""
+
+        return sum(len(message.content) for message in messages)
+
+    def _summarize(self, value: str) -> str:
+        """限制 Trace 中保存的文本长度，保留明确截断标记。"""
+
+        limit = self._config.max_trace_value_chars
+        if len(value) <= limit:
+            return value
+        marker = "...[truncated]"
+        if limit <= len(marker):
+            return marker[:limit]
+        return value[: limit - len(marker)] + marker
