@@ -63,7 +63,7 @@ YJY_SESSION_DIR=.yjy-sessions
 YJY_TRACE_DIR=logs
 ```
 
-CLI 会自动读取**当前目录**的 `.env`。如果你在别的目录执行，会读不到配置，报
+CLI 会自动读取**当前目录**的 `.env`。如果你在别的目录执行，会读不到配置，报  
 `LLM_BASE_URL must not be empty`。
 
 先确认能对话：
@@ -80,13 +80,13 @@ uv run yjy-agent-runtime --session-id hello "你好，请用一句话介绍你�
 
 三个工具都是模型根据“工具描述 + 参数 Schema”自主选择的，不是硬编码路由。想稳定触发，最直接的办法是**明确说出工具名**：
 
-| 想触发 | 直接这样说 |
-| --- | --- |
+| 想触发        | 直接这样说                      |
+| ---------- | -------------------------- |
 | calculator | `用 calculator 计算 137 * 29` |
-| search | `用 search 搜索 session 隔离` |
-| todo 新增 | `用 todo 记一条待办：明天写周报` |
-| todo 查看 | `列出我的待办` |
-| echo | `用 echo 重复：hello` |
+| search     | `用 search 搜索 session 隔离`   |
+| todo 新增    | `用 todo 记一条待办：明天写周报`       |
+| todo 查看    | `列出我的待办`                   |
+| echo       | `用 echo 重复：hello`          |
 
 如果只说“算一下”，模型可能直接心算而不调用工具；这不是 bug，是模型的选择。想验证工具链路，就把工具名说清楚。
 
@@ -182,13 +182,13 @@ session: chat（/exit 退出，/new <id> 切换会话，/help 查看命令）
 助手> 你刚才告诉我你叫小林。
 ```
 
-| 命令 | 作用 |
-| --- | --- |
-| `/exit` 或 `/quit` | 退出 |
+| 命令                  | 作用                           |
+| ------------------- | ---------------------------- |
+| `/exit` 或 `/quit`   | 退出                           |
 | `/new <session-id>` | 切换到另一个 Session（旧 Session 保留） |
-| `/help` | 查看命令 |
+| `/help`             | 查看命令                         |
 
-注意：交互模式只是省掉“反复启动进程、反复输入 session id”，**不会减少模型延迟**。
+注意：交互模式只是省掉“反复启动进程、反复输入 session id”，**不会减少模型延迟**。  
 每条消息仍然要等一次或多次 LLM 返回。
 
 ---
@@ -233,13 +233,13 @@ run_terminated
 
 几个值得看的字段：
 
-| 字段 | 含义 |
-| --- | --- |
-| `run_id` / `trace_id` | 一次运行的关联 ID |
-| `prompt_chars` | 本轮真正发给模型的字符数 |
-| `session_chars_before` | 压缩前 Session 的总字符数 |
-| `summary_covered_message_count` | 摘要已经覆盖多少条旧消息 |
-| `arguments` / `result_summary` | 工具参数与结果摘要（已脱敏、已截断） |
+| 字段                              | 含义                 |
+| ------------------------------- | ------------------ |
+| `run_id` / `trace_id`           | 一次运行的关联 ID         |
+| `prompt_chars`                  | 本轮真正发给模型的字符数       |
+| `session_chars_before`          | 压缩前 Session 的总字符数  |
+| `summary_covered_message_count` | 摘要已经覆盖多少条旧消息       |
+| `arguments` / `result_summary`  | 工具参数与结果摘要（已脱敏、已截断） |
 
 ### 4.2 终端里的耗时汇总
 
@@ -290,7 +290,7 @@ PY
 ls .yjy-sessions
 ```
 
-文件名是 `sha256(session_id).json`，不是直接拼 session_id。这样即使 ID 里有 `/` 或
+文件名是 `sha256(session_id).json`，不是直接拼 session_id。这样即使 ID 里有 `/` 或  
 `..`，也不会越出目录。
 
 打开任意一个文件，能看到：
@@ -306,7 +306,7 @@ ls .yjy-sessions
 }
 ```
 
-`messages` 是给模型看的历史，`tool_calls` / `tool_results` 是结构化审计数据，
+`messages` 是给模型看的历史，`tool_calls` / `tool_results` 是结构化审计数据，  
 `todos` 是 Session 级状态，`summary` 是压缩后的摘要。
 
 ---
@@ -315,12 +315,12 @@ ls .yjy-sessions
 
 默认预算在 `ContextConfig` 里：
 
-| 配置 | 默认值 | 作用 |
-| --- | --- | --- |
-| `max_history_messages` | 20 | 最近保留多少条消息 |
-| `max_tool_result_chars` | 2000 | 单条工具结果上限 |
-| `max_summary_chars` | 4000 | 摘要长度上限 |
-| `max_context_chars` | 24000 | 整轮模型输入上限 |
+| 配置                      | 默认值   | 作用        |
+| ----------------------- | ----- | --------- |
+| `max_history_messages`  | 20    | 最近保留多少条消息 |
+| `max_tool_result_chars` | 2000  | 单条工具结果上限  |
+| `max_summary_chars`     | 4000  | 摘要长度上限    |
+| `max_context_chars`     | 24000 | 整轮模型输入上限  |
 
 压缩策略只有一句话：**超出最近窗口的旧消息，合并成一段摘要；摘要本身也有长度上限。**
 
@@ -369,37 +369,38 @@ for line in open("logs/long-demo.jsonl", encoding="utf-8"):
 PY
 ```
 
-我实测的一组数：Session 约 48,000 字符，压缩后模型输入约 23,000 字符，摘要 4,000
+我实测的一组数：Session 约 48,000 字符，压缩后模型输入约 23,000 字符，摘要 4,000  
 字符，覆盖 26 条旧消息，早期代号仍然保留。
 
 ### 5.3 当前压缩的边界
 
 - 摘要是**抽取式**的：把旧消息按行拼接后截断，不做语义总结。够用，但不是“智能摘要”。
-- **单条消息本身超过约 2.2 万字符**时，没有旧历史可压，会以 `context_error` 结束。
+- **单条消息本身超过约 2.2 万字符**时，没有旧历史可压，会以 `context_error` 结束。  
   这是当前唯一能稳定复现的运行失败；正常对话不会触发。
 - 压缩只在 Context 构建时发生，不改写 Session 里的原始消息。
 
 ---
 
+
 ## 6. 代码阅读顺序
 
 不要从 `builder.py` 开始，它是最绕的一个。按下面顺序读，每一步只回答一个问题。
 
-| 顺序 | 文件 | 读什么 | 回答什么问题 |
-| --- | --- | --- | --- |
-| 1 | `src/yjy_agent_runtime/domain/models.py` | `Message`、`ToolCall`、`ToolResult`、`Session`、`RunRequest` | 系统里有哪些稳定对象？哪些非法状态在构造期就被拒绝？ |
-| 2 | `src/yjy_agent_runtime/agent/ports.py` | 六个 Protocol | AgentLoop 需要哪些能力？为什么依赖抽象而不是具体实现？ |
-| 3 | `src/yjy_agent_runtime/agent/loop.py` | 只读 `run()` | 一轮循环的 6 个阶段是什么？三种出口分别在哪？ |
-| 4 | `src/yjy_agent_runtime/infrastructure/context/builder.py` | 只读 `build()` | Context 的顺序是什么？超预算时先压什么、后压什么？ |
-| 5 | `src/yjy_agent_runtime/infrastructure/llm/openai_compatible.py` | `decide()` + `_decode_decision()` | 模型返回的 JSON 怎么变成领域对象？错误怎么分类？ |
-| 6 | `src/yjy_agent_runtime/infrastructure/tools/registry.py` | 全部 | 工具怎么注册、怎么按名字查找？ |
-| 7 | `src/yjy_agent_runtime/infrastructure/tools/executor.py` | `execute()` | 参数校验、超时、异常怎么变成 `ToolResult`？ |
-| 8 | `src/yjy_agent_runtime/infrastructure/tools/builtin.py` | 四个工具类 | 每个工具的 Schema 和实现分别是什么？ |
-| 9 | `src/yjy_agent_runtime/infrastructure/session/in_memory.py` | 全部 | 不可变快照怎么更新？ |
-| 10 | `src/yjy_agent_runtime/infrastructure/session/file.py` | `_save()` | 怎么保证写文件不会留下半个 JSON？ |
-| 11 | `src/yjy_agent_runtime/infrastructure/trace/*.py` | `redaction.py`、`jsonl.py` | Trace 怎么写、敏感字段怎么脱敏？ |
-| 12 | `src/yjy_agent_runtime/interfaces/cli.py` | `build_loop()` + `main()` | 具体实现在哪里装配？退出码怎么定？ |
-| 13 | `tests/test_agent_loop.py`、`tests/test_end_to_end.py` | 全部 | 正常路径和异常路径分别怎么测？ |
+| 顺序 | 文件                                                              | 读什么                                                      | 回答什么问题                           |
+| -- | --------------------------------------------------------------- | -------------------------------------------------------- | -------------------------------- |
+| 1  | `src/yjy_agent_runtime/domain/models.py`                        | `Message`、`ToolCall`、`ToolResult`、`Session`、`RunRequest` | 系统里有哪些稳定对象？哪些非法状态在构造期就被拒绝？       |
+| 2  | `src/yjy_agent_runtime/agent/ports.py`                          | 六个 Protocol                                              | AgentLoop 需要哪些能力？为什么依赖抽象而不是具体实现？ |
+| 3  | `src/yjy_agent_runtime/agent/loop.py`                           | 只读 `run()`                                               | 一轮循环的 6 个阶段是什么？三种出口分别在哪？         |
+| 4  | `src/yjy_agent_runtime/infrastructure/context/builder.py`       | 只读 `build()`                                             | Context 的顺序是什么？超预算时先压什么、后压什么？    |
+| 5  | `src/yjy_agent_runtime/infrastructure/llm/openai_compatible.py` | `decide()` + `_decode_decision()`                        | 模型返回的 JSON 怎么变成领域对象？错误怎么分类？      |
+| 6  | `src/yjy_agent_runtime/infrastructure/tools/registry.py`        | 全部                                                       | 工具怎么注册、怎么按名字查找？                  |
+| 7  | `src/yjy_agent_runtime/infrastructure/tools/executor.py`        | `execute()`                                              | 参数校验、超时、异常怎么变成 `ToolResult`？     |
+| 8  | `src/yjy_agent_runtime/infrastructure/tools/builtin.py`         | 四个工具类                                                    | 每个工具的 Schema 和实现分别是什么？           |
+| 9  | `src/yjy_agent_runtime/infrastructure/session/in_memory.py`     | 全部                                                       | 不可变快照怎么更新？                       |
+| 10 | `src/yjy_agent_runtime/infrastructure/session/file.py`          | `_save()`                                                | 怎么保证写文件不会留下半个 JSON？              |
+| 11 | `src/yjy_agent_runtime/infrastructure/trace/*.py`               | `redaction.py`、`jsonl.py`                                | Trace 怎么写、敏感字段怎么脱敏？              |
+| 12 | `src/yjy_agent_runtime/interfaces/cli.py`                       | `build_loop()` + `main()`                                | 具体实现在哪里装配？退出码怎么定？                |
+| 13 | `tests/test_agent_loop.py`、`tests/test_end_to_end.py`           | 全部                                                       | 正常路径和异常路径分别怎么测？                  |
 
 读 `loop.py` 时，建议对照 `docs/architecture-layers.md` 第 2 节的数据流，一行一行对。
 
@@ -407,16 +408,16 @@ PY
 
 ## 7. 常见报错对照
 
-| 现象 | 原因 | 处理 |
-| --- | --- | --- |
-| `LLMConfigurationError: LLM_BASE_URL must not be empty` | 当前目录没有 `.env`，或变量名写错 | 在项目根目录创建 `.env`，或 `--env-file` 指定 |
-| `LLM service returned HTTP 401` | Key 无效或过期 | 换 Key；不要写进代码或 Git |
-| `LLMNetworkError: LLM request timed out` | 网络慢或网关排队 | 调大 `LLM_TIMEOUT_SECONDS`，或换网络 |
-| `2 skipped`（`pytest -m integration`） | 没有把 `.env` 传进 pytest | `uv run --env-file .env pytest -m integration -q` |
-| `context_error` | 单条输入超过 Context 预算 | 拆短输入；后续会加友好提示 |
-| `PermissionError: mkdir .../pytest-of-root` | 沙箱不允许写系统临时目录 | `TMPDIR=/tmp/xxx uv run pytest -q --basetemp=/tmp/xxx/base` |
-| `search` 返回“未找到” | 查询词和三条 mock 文档完全不匹配 | 换关键词，例如 `session`、`context`、`agent loop` |
-| 运行输出 `终止原因：max_iterations` | 模型一直调工具没收敛 | 调大 `--max-iterations`，或把任务拆小 |
+| 现象                                                      | 原因                   | 处理                                                          |
+| ------------------------------------------------------- | -------------------- | ----------------------------------------------------------- |
+| `LLMConfigurationError: LLM_BASE_URL must not be empty` | 当前目录没有 `.env`，或变量名写错 | 在项目根目录创建 `.env`，或 `--env-file` 指定                           |
+| `LLM service returned HTTP 401`                         | Key 无效或过期            | 换 Key；不要写进代码或 Git                                           |
+| `LLMNetworkError: LLM request timed out`                | 网络慢或网关排队             | 调大 `LLM_TIMEOUT_SECONDS`，或换网络                               |
+| `2 skipped`（`pytest -m integration`）                    | 没有把 `.env` 传进 pytest | `uv run --env-file .env pytest -m integration -q`           |
+| `context_error`                                         | 单条输入超过 Context 预算    | 拆短输入；后续会加友好提示                                               |
+| `PermissionError: mkdir .../pytest-of-root`             | 沙箱不允许写系统临时目录         | `TMPDIR=/tmp/xxx uv run pytest -q --basetemp=/tmp/xxx/base` |
+| `search` 返回“未找到”                                        | 查询词和三条 mock 文档完全不匹配  | 换关键词，例如 `session`、`context`、`agent loop`                    |
+| 运行输出 `终止原因：max_iterations`                              | 模型一直调工具没收敛           | 调大 `--max-iterations`，或把任务拆小                                |
 
 ---
 
@@ -424,16 +425,16 @@ PY
 
 按顺序打勾，全部通过就说明你本地链路是通的：
 
-- [ ] `uv run yjy-agent-runtime --session-id hello "你好"` 退出码 0
-- [ ] `calculator` 算出 `137 * 29 = 3973`
-- [ ] `search` 命中 `Session 必须显式携带 session_id`
-- [ ] `todo add` 后，同 session `todo list` 能看到
-- [ ] 另一个 session `todo list` 返回“当前没有待办”
-- [ ] 三工具串联任务退出码 0，trace 中有两次以上 `tool_completed`
-- [ ] 同 session 追问能同时引用计算结果和待办
-- [ ] 长历史压缩后仍能回答 `ORANGE-42`
-- [ ] `logs/<session>.jsonl` 存在，且没有 API Key
-- [ ] `uv run pytest -q` 全绿
+- [x] `uv run yjy-agent-runtime --session-id hello "你好"` 退出码 0
+- [x] `calculator` 算出 `137 * 29 = 3973`
+- [x] `search` 命中 `Session 必须显式携带 session_id`
+- [x] `todo add` 后，同 session `todo list` 能看到
+- [x] 另一个 session `todo list` 返回“当前没有待办”
+- [x] 三工具串联任务退出码 0，trace 中有两次以上 `tool_completed`
+- [x] 同 session 追问能同时引用计算结果和待办
+- [x] 长历史压缩后仍能回答 `ORANGE-42`
+- [x] `logs/<session>.jsonl` 存在，且没有 API Key
+- [x] `uv run pytest -q` 全绿
 
 ---
 
