@@ -207,13 +207,19 @@ uv sync
 uv run yjy-agent-runtime
 ```
 
-环境变量预计通过本地 `.env` 或 Shell 注入：
+环境变量通过本地 `.env` 或 Shell 注入，可先从示例文件复制：
 
 ```bash
-export LLM_API_KEY="your-api-key"
+cp .env.example .env
 ```
 
-`.env` 不会提交到 Git。实际变量名、模型配置和 CLI 参数将在 LLM 适配器实现后补充。
+```dotenv
+LLM_BASE_URL=https://your-llm-provider.example/v1
+LLM_MODEL=your-model-name
+LLM_API_KEY=your-api-key
+```
+
+`.env` 已被 Git 忽略，仅提交不包含真实密钥的 `.env.example`。变量分别用于配置兼容接口地址、模型名称和 API Key。
 
 ## 测试
 
