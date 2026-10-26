@@ -1,6 +1,6 @@
 """最小内置工具测试。"""
 
-from time import sleep
+from time import perf_counter, sleep
 
 import pytest
 
@@ -103,6 +103,83 @@ def test_calculator_rejects_code_execution_and_calculates_safely() -> None:
     assert success.content == "56"
     assert failure.status is ToolResultStatus.ERROR
     assert failure.error_type == "ValueError"
+
+
+def test_calculator_supports_normal_arithmetic() -> None:
+    store = InMemorySessionStore()
+    registry = ToolRegistry()
+    register_builtin_tools(registry, store)
+    executor = RegistryToolExecutor(registry)
+
+    for index, (expression, expected) in enumerate(
+        (("2**10", "1024"), ("1/4", "0.25"), ("7 % 4", "3"), ("-(3+4)", "-7")),
+        start=1,
+    ):
+        result = executor.execute(
+            "session-a",
+            ToolCall(f"call-{index}", "calculator", {"expression": expression}),
+        )
+        assert result.status is ToolResultStatus.SUCCESS, expression
+        assert result.content == expected, expression
+
+
+def test_calculator_rejects_huge_exponent_without_computing_it() -> None:
+    """P2-02 回归：``9**9**9`` 必须在算指数时就失败，而不是真的去求幂。"""
+
+    store = InMemorySessionStore()
+    registry = ToolRegistry()
+    register_builtin_tools(registry, store)
+    executor = RegistryToolExecutor(registry)
+
+    started = perf_counter()
+    result = executor.execute(
+        "session-a",
+        ToolCall("call-1", "calculator", {"expression": "9**9**9"}),
+    )
+    elapsed = perf_counter() - started
+
+    assert result.status is ToolResultStatus.ERROR
+    assert result.error_type == "ValueError"
+    assert "exponent" in result.content
+    assert elapsed < 1.0
+
+
+def test_calculator_rejects_overlong_expression() -> None:
+    store = InMemorySessionStore()
+    registry = ToolRegistry()
+    register_builtin_tools(registry, store)
+    executor = RegistryToolExecutor(registry)
+    expression = "1+" * 100 + "1"  # 201 字符，超过 200 的上限
+
+    result = executor.execute(
+        "session-a",
+        ToolCall("call-1", "calculator", {"expression": expression}),
+    )
+
+    assert result.status is ToolResultStatus.ERROR
+    assert result.error_type == "ValueError"
+    assert "at most 200 characters" in result.content
+
+
+def test_calculator_rejects_deep_nesting_and_oversized_results() -> None:
+    store = InMemorySessionStore()
+    registry = ToolRegistry()
+    register_builtin_tools(registry, store)
+    executor = RegistryToolExecutor(registry)
+
+    nested = executor.execute(
+        "session-a",
+        ToolCall("call-1", "calculator", {"expression": "1" + "+1" * 40}),
+    )
+    oversized = executor.execute(
+        "session-a",
+        ToolCall("call-2", "calculator", {"expression": "(10**64)**64"}),
+    )
+
+    assert nested.status is ToolResultStatus.ERROR
+    assert "nesting" in nested.content
+    assert oversized.status is ToolResultStatus.ERROR
+    assert "bits" in oversized.content
 
 
 def test_register_builtin_tools_requires_explicit_session_store() -> None:
