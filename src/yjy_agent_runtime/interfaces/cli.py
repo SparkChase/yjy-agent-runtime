@@ -1,6 +1,7 @@
 """YJY Agent Runtime 的最小命令行入口。"""
 
 import argparse
+import os
 import sys
 
 from yjy_agent_runtime.agent import AgentLoop
@@ -10,7 +11,7 @@ from yjy_agent_runtime.infrastructure.llm import (
     OpenAICompatibleConfig,
     OpenAICompatibleLLMClient,
 )
-from yjy_agent_runtime.infrastructure.session import InMemorySessionStore
+from yjy_agent_runtime.infrastructure.session import JsonFileSessionStore
 from yjy_agent_runtime.infrastructure.tools import (
     RegistryToolExecutor,
     ToolRegistry,
@@ -42,9 +43,11 @@ def main(argv: list[str] | None = None) -> int:
         config = OpenAICompatibleConfig.from_environment()
         llm = OpenAICompatibleLLMClient(config)
         try:
-            store = InMemorySessionStore()
+            store = JsonFileSessionStore(
+                os.getenv("YJY_SESSION_DIR", ".yjy-sessions")
+            )
             registry = ToolRegistry()
-            register_builtin_tools(registry)
+            register_builtin_tools(registry, store)
             loop = AgentLoop(
                 context_provider=ContextBuilder(
                     store,

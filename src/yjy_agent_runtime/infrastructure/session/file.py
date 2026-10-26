@@ -1,0 +1,257 @@
+"""可恢复的 JSON 文件 SessionStore。"""
+
+import hashlib
+import json
+import os
+import tempfile
+from pathlib import Path
+from threading import RLock
+from typing import Any
+
+from yjy_agent_runtime.domain import (
+    Message,
+    MessageRole,
+    Session,
+    SessionSummary,
+    ToolCall,
+    ToolResult,
+    ToolResultStatus,
+)
+
+from .memory import SessionNotFoundError
+
+
+class SessionStorageError(RuntimeError):
+    """Session 快照不存在、损坏或无法写入。"""
+
+
+class JsonFileSessionStore:
+    """将每个 Session 保存为独立 JSON 快照，并原子替换文件。"""
+
+    def __init__(self, directory: str | Path) -> None:
+        self._directory = Path(directory)
+        self._directory.mkdir(parents=True, exist_ok=True)
+        self._lock = RLock()
+
+    def get(self, session_id: str) -> Session | None:
+        self._validate_session_id(session_id)
+        path = self._path_for(session_id)
+        if not path.exists():
+            return None
+        with self._lock:
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                return self._decode_session(payload, expected_id=session_id)
+            except SessionStorageError:
+                raise
+            except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError) as error:
+                raise SessionStorageError(
+                    f"session snapshot is corrupted: {session_id}"
+                ) from error
+
+    def get_or_create(self, session_id: str) -> Session:
+        current = self.get(session_id)
+        if current is not None:
+            return current
+        session = Session(session_id=session_id)
+        self._save(session)
+        return session
+
+    def append_message(self, session_id: str, message: Message) -> Session:
+        current = self._require(session_id)
+        updated = Session(
+            session_id=session_id,
+            messages=(*current.messages, message),
+            tool_calls=current.tool_calls,
+            tool_results=current.tool_results,
+            todos=current.todos,
+            summary=current.summary,
+        )
+        self._save(updated)
+        return updated
+
+    def append_tool_interaction(
+        self,
+        session_id: str,
+        call: ToolCall,
+        result: ToolResult,
+    ) -> Session:
+        if call.call_id != result.call_id or call.name != result.tool_name:
+            raise ValueError("tool call and result must refer to the same interaction")
+        current = self._require(session_id)
+        updated = Session(
+            session_id=session_id,
+            messages=current.messages,
+            tool_calls=(*current.tool_calls, call),
+            tool_results=(*current.tool_results, result),
+            todos=current.todos,
+            summary=current.summary,
+        )
+        self._save(updated)
+        return updated
+
+    def set_summary(self, session_id: str, summary: SessionSummary | None) -> Session:
+        current = self._require(session_id)
+        updated = Session(
+            session_id=session_id,
+            messages=current.messages,
+            tool_calls=current.tool_calls,
+            tool_results=current.tool_results,
+            todos=current.todos,
+            summary=summary,
+        )
+        self._save(updated)
+        return updated
+
+    def append_todo(self, session_id: str, todo: str) -> Session:
+        if not todo:
+            raise ValueError("todo must not be empty")
+        current = self._require(session_id)
+        updated = Session(
+            session_id=session_id,
+            messages=current.messages,
+            tool_calls=current.tool_calls,
+            tool_results=current.tool_results,
+            todos=(*current.todos, todo),
+            summary=current.summary,
+        )
+        self._save(updated)
+        return updated
+
+    def list_todos(self, session_id: str) -> tuple[str, ...]:
+        return self._require(session_id).todos
+
+    def _require(self, session_id: str) -> Session:
+        self._validate_session_id(session_id)
+        session = self.get(session_id)
+        if session is None:
+            raise SessionNotFoundError(f"session not found: {session_id}")
+        return session
+
+    def _save(self, session: Session) -> None:
+        payload = self._encode_session(session)
+        path = self._path_for(session.session_id)
+        with self._lock:
+            temporary_path: str | None = None
+            try:
+                with tempfile.NamedTemporaryFile(
+                    mode="w",
+                    encoding="utf-8",
+                    dir=self._directory,
+                    prefix=".session-",
+                    suffix=".tmp",
+                    delete=False,
+                ) as temporary:
+                    json.dump(payload, temporary, ensure_ascii=False, sort_keys=True)
+                    temporary.write("\n")
+                    temporary.flush()
+                    os.fsync(temporary.fileno())
+                    temporary_path = temporary.name
+                os.replace(temporary_path, path)
+            except OSError as error:
+                if temporary_path:
+                    try:
+                        os.unlink(temporary_path)
+                    except OSError:
+                        pass
+                raise SessionStorageError(
+                    f"unable to save session: {session.session_id}"
+                ) from error
+
+    def _path_for(self, session_id: str) -> Path:
+        digest = hashlib.sha256(session_id.encode("utf-8")).hexdigest()
+        return self._directory / f"{digest}.json"
+
+    @staticmethod
+    def _validate_session_id(session_id: str) -> None:
+        if not session_id:
+            raise ValueError("session id must not be empty")
+
+    @staticmethod
+    def _encode_session(session: Session) -> dict[str, Any]:
+        return {
+            "session_id": session.session_id,
+            "messages": [
+                {
+                    "role": message.role.value,
+                    "content": message.content,
+                    "tool_call_id": message.tool_call_id,
+                }
+                for message in session.messages
+            ],
+            "tool_calls": [
+                {
+                    "call_id": call.call_id,
+                    "name": call.name,
+                    "arguments": dict(call.arguments),
+                }
+                for call in session.tool_calls
+            ],
+            "tool_results": [
+                {
+                    "call_id": result.call_id,
+                    "tool_name": result.tool_name,
+                    "status": result.status.value,
+                    "content": result.content,
+                    "error_type": result.error_type,
+                }
+                for result in session.tool_results
+            ],
+            "todos": list(session.todos),
+            "summary": (
+                {
+                    "content": session.summary.content,
+                    "covered_message_count": session.summary.covered_message_count,
+                }
+                if session.summary is not None
+                else None
+            ),
+        }
+
+    @staticmethod
+    def _decode_session(payload: Any, *, expected_id: str) -> Session:
+        if not isinstance(payload, dict) or payload.get("session_id") != expected_id:
+            raise SessionStorageError("session snapshot has an invalid session id")
+        messages = tuple(
+            Message(
+                role=MessageRole(item["role"]),
+                content=item["content"],
+                tool_call_id=item.get("tool_call_id"),
+            )
+            for item in payload.get("messages", [])
+        )
+        calls = tuple(
+            ToolCall(
+                call_id=item["call_id"],
+                name=item["name"],
+                arguments=item.get("arguments", {}),
+            )
+            for item in payload.get("tool_calls", [])
+        )
+        results = tuple(
+            ToolResult(
+                call_id=item["call_id"],
+                tool_name=item["tool_name"],
+                status=ToolResultStatus(item["status"]),
+                content=item["content"],
+                error_type=item.get("error_type"),
+            )
+            for item in payload.get("tool_results", [])
+        )
+        raw_summary = payload.get("summary")
+        summary = (
+            SessionSummary(
+                content=raw_summary["content"],
+                covered_message_count=raw_summary["covered_message_count"],
+            )
+            if raw_summary is not None
+            else None
+        )
+        return Session(
+            session_id=expected_id,
+            messages=messages,
+            tool_calls=calls,
+            tool_results=results,
+            todos=tuple(payload.get("todos", [])),
+            summary=summary,
+        )
