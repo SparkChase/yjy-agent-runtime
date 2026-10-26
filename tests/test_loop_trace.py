@@ -15,6 +15,7 @@ from yjy_agent_runtime.domain import (
     Message,
     MessageRole,
     RunRequest,
+    TimeoutSemantics,
     ToolCall,
     ToolCallDecision,
     ToolResult,
@@ -50,8 +51,13 @@ class Context:
 class FixedExecutor:
     """返回固定内容的工具执行器，便于断言结果摘要。"""
 
-    def __init__(self, content: str) -> None:
+    def __init__(
+        self,
+        content: str,
+        semantics: TimeoutSemantics | None = None,
+    ) -> None:
         self._content = content
+        self._semantics = semantics
 
     def execute(self, session_id: str, call: ToolCall) -> ToolResult:
         del session_id
@@ -60,6 +66,7 @@ class FixedExecutor:
             tool_name=call.name,
             status=ToolResultStatus.SUCCESS,
             content=self._content,
+            timeout_semantics=self._semantics,
         )
 
 
@@ -68,13 +75,14 @@ def run_once(
     decisions: Sequence[AgentDecision],
     tool_content: str = "42",
     max_trace_value_chars: int = 500,
+    semantics: TimeoutSemantics | None = None,
 ) -> tuple[InMemoryTraceRecorder, object]:
     trace = InMemoryTraceRecorder()
     loop = AgentLoop(
         context_provider=Context(),
         llm_client=FakeLLM(decisions),
         session_store=InMemorySessionStore(),
-        tool_executor=FixedExecutor(tool_content),
+        tool_executor=FixedExecutor(tool_content, semantics),
         trace_recorder=trace,
         config=LoopConfig(max_trace_value_chars=max_trace_value_chars),
     )
@@ -119,6 +127,22 @@ def test_tool_events_record_arguments_and_result_summary() -> None:
     assert started.attributes["arguments"] == {"expression": "6 * 7"}
     assert completed.attributes["status"] == "success"
     assert completed.attributes["result_summary"] == "42"
+
+
+def test_tool_completed_records_timeout_semantics() -> None:
+    """超时语义必须进 Trace：调用方要知道“超时后是否可能还有副作用”。"""
+
+    trace, _ = run_once(
+        decisions=[
+            ToolCallDecision((ToolCall("call-1", "todo", {"action": "add"}),)),
+            FinalAnswerDecision("完成"),
+        ],
+        semantics=TimeoutSemantics.SYNCHRONOUS,
+    )
+
+    completed = find_events(trace, "tool_completed")[0]
+
+    assert completed.attributes["timeout_semantics"] == "synchronous"
 
 
 def test_long_tool_result_is_truncated_in_trace() -> None:

@@ -13,6 +13,7 @@ from yjy_agent_runtime.domain import (
     MessageRole,
     Session,
     SessionSummary,
+    TimeoutSemantics,
     ToolCall,
     ToolResult,
     ToolResultStatus,
@@ -199,6 +200,11 @@ class JsonFileSessionStore:
                     "status": result.status.value,
                     "content": result.content,
                     "error_type": result.error_type,
+                    "timeout_semantics": (
+                        result.timeout_semantics.value
+                        if result.timeout_semantics is not None
+                        else None
+                    ),
                 }
                 for result in session.tool_results
             ],
@@ -240,6 +246,12 @@ class JsonFileSessionStore:
                 status=ToolResultStatus(item["status"]),
                 content=item["content"],
                 error_type=item.get("error_type"),
+                # 旧快照没有这个字段，缺省即"未记录超时语义"，不伪造。
+                timeout_semantics=(
+                    TimeoutSemantics(item["timeout_semantics"])
+                    if item.get("timeout_semantics")
+                    else None
+                ),
             )
             for item in payload.get("tool_results", [])
         )

@@ -180,6 +180,25 @@ class ToolResultStatus(StrEnum):
     ERROR = "error"
 
 
+class TimeoutSemantics(StrEnum):
+    """一次工具执行的超时语义。
+
+    ``join(timeout)`` 只能停止等待，不能停止线程。把“等待超时”当成“执行已取消”
+    会让调用方误以为外部状态不会再变。因此结果里必须写清楚这次执行属于哪种语义：
+
+    - ``SYNCHRONOUS``：有副作用的工具在调用线程同步执行，根本没有超时，
+      返回值就是真实结果，不存在“报告超时后又写入”。
+    - ``ABANDONED_SAFE``：无副作用的工具等待超时，工作线程被放弃，但它按约定
+      不改变外部状态，晚结束也不会造成可观察影响。
+    - ``COOPERATIVE``：有副作用的工具实现了协作式截止时间，超时后会在写入前
+      检查截止时间并放弃提交，因此“已报告超时”与“稍后仍然写入”不会同时发生。
+    """
+
+    SYNCHRONOUS = "synchronous"
+    ABANDONED_SAFE = "abandoned_safe"
+    COOPERATIVE = "cooperative"
+
+
 @dataclass(frozen=True, slots=True)
 class ToolResult:
     """一次工具调用的结构化结果。"""
@@ -189,6 +208,8 @@ class ToolResult:
     status: ToolResultStatus
     content: str
     error_type: str | None = None
+    # 执行器给出的超时语义，供 Trace 与调用方判断“超时之后是否可能还有副作用”。
+    timeout_semantics: TimeoutSemantics | None = None
 
     def __post_init__(self) -> None:
         if not self.call_id or not self.tool_name:

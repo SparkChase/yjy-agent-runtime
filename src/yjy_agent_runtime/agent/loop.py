@@ -274,6 +274,11 @@ class AgentLoop:
                     tool_name=call.name,
                     status=tool_result.status.value,
                     error_type=tool_result.error_type,
+                    timeout_semantics=(
+                        tool_result.timeout_semantics.value
+                        if tool_result.timeout_semantics is not None
+                        else None
+                    ),
                     duration_ms=self._duration_ms(tool_started),
                     result_summary=self._summarize(tool_result.content),
                 )
