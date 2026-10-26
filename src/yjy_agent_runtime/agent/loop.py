@@ -131,6 +131,7 @@ class AgentLoop:
                     trace_id=trace_id,
                     iteration=iteration,
                     decision_type="final_answer",
+                    decision_summary=decision.decision_summary,
                 )
                 self._session_store.append_message(
                     request.session_id,
@@ -169,6 +170,7 @@ class AgentLoop:
                 iteration=iteration,
                 decision_type="tool_calls",
                 tool_call_count=len(decision.tool_calls),
+                decision_summary=decision.decision_summary,
             )
             for call in decision.tool_calls:
                 tool_started = perf_counter()

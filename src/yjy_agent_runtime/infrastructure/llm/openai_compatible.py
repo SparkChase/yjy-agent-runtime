@@ -134,9 +134,9 @@ class OpenAICompatibleLLMClient:
         if encoded and encoded[0]["role"] == MessageRole.SYSTEM.value:
             encoded[0]["content"] += (
                 "\n请只返回 JSON 对象。最终回答格式："
-                + '{"type":"final_answer","answer":"..."}。工具调用格式：'
-                + '{"type":"tool_calls","tool_calls":[{"name":"...","arguments":{...}}]}。'
-                + "不得输出 JSON 以外的文本。"
+                + '{"type":"final_answer","answer":"...","decision_summary":"公开摘要"}。工具调用格式：'
+                + '{"type":"tool_calls","tool_calls":[{"name":"...","arguments":{...}}],"decision_summary":"公开摘要"}。'
+                + "decision_summary 只能是简短公开摘要，不得输出私有思维链；不得输出 JSON 以外的文本。"
             )
         return encoded
 
@@ -149,7 +149,10 @@ class OpenAICompatibleLLMClient:
             answer = data.get("answer")
             if not isinstance(answer, str) or not answer:
                 raise LLMResponseError("final_answer requires a non-empty answer")
-            return FinalAnswerDecision(answer)
+            summary = data.get("decision_summary", "")
+            if not isinstance(summary, str):
+                raise LLMResponseError("decision_summary must be a string")
+            return FinalAnswerDecision(answer, decision_summary=summary)
         if decision_type == "tool_calls":
             calls = data.get("tool_calls")
             if not isinstance(calls, list) or not calls:
@@ -171,5 +174,8 @@ class OpenAICompatibleLLMClient:
                         arguments=dict(arguments),
                     )
                 )
-            return ToolCallDecision(tuple(decoded))
+            summary = data.get("decision_summary", "")
+            if not isinstance(summary, str):
+                raise LLMResponseError("decision_summary must be a string")
+            return ToolCallDecision(tuple(decoded), decision_summary=summary)
         raise LLMResponseError("decision type must be final_answer or tool_calls")

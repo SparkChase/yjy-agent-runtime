@@ -160,6 +160,7 @@ def test_loop_returns_direct_answer_in_one_iteration() -> None:
     assert result.termination_reason is TerminationReason.FINAL_ANSWER
     assert tools.calls == []
     assert trace.events[-1][1]["reason"] == "final_answer"
+    assert trace.events[-2][1]["decision_summary"] == ""
 
 
 def test_loop_executes_tool_and_returns_result_to_next_context() -> None:

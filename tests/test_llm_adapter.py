@@ -50,20 +50,24 @@ def test_client_decodes_final_answer_and_sends_authentication() -> None:
         payload = json.loads(request.content)
         assert payload["model"] == "test-model"
         assert payload["response_format"] == {"type": "json_object"}
-        return response_for('{"type":"final_answer","answer":"完成"}')
+        return response_for(
+            '{"type":"final_answer","answer":"完成",'
+            '"decision_summary":"直接回答"}'
+        )
 
     client = make_client(handler)
 
     decision = client.decide((Message(MessageRole.USER, "你好"),))
 
-    assert decision == FinalAnswerDecision("完成")
+    assert decision == FinalAnswerDecision("完成", decision_summary="直接回答")
 
 
 def test_client_decodes_tool_calls() -> None:
     client = make_client(
         lambda request: response_for(
             '{"type":"tool_calls","tool_calls":['
-            '{"name":"echo","arguments":{"text":"hello"}}]}'
+            '{"name":"echo","arguments":{"text":"hello"}}],'
+            '"decision_summary":"需要回显"}'
         )
     )
 
@@ -72,6 +76,7 @@ def test_client_decodes_tool_calls() -> None:
     assert isinstance(decision, ToolCallDecision)
     assert decision.tool_calls[0].name == "echo"
     assert decision.tool_calls[0].arguments == {"text": "hello"}
+    assert decision.decision_summary == "需要回显"
 
 
 @pytest.mark.parametrize(
