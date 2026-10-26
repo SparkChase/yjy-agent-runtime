@@ -23,7 +23,7 @@ class ContextProvider(Protocol):
         self,
         request: RunRequest,
         tool_results: Sequence[ToolResult],
-    ) -> Sequence:
+    ) -> Sequence[Message]:
         """返回当前 Session 本轮需要发送给模型的消息。"""
         ...
 

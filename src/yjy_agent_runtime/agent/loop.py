@@ -64,7 +64,19 @@ class AgentLoop:
         )
 
         for iteration in range(1, self._config.max_iterations + 1):
-            messages = self._context_provider.build(request, tuple(tool_results))
+            try:
+                messages = self._context_provider.build(request, tuple(tool_results))
+            # 端口是基础设施异常的边界，需要保留任意异常的原始类型和消息，
+            # 再转换为应用层受控的终止结果。
+            except Exception as error:  # noqa: BLE001
+                return self._terminate_after_dependency_error(
+                    request=request,
+                    trace_id=trace_id,
+                    iteration=iteration,
+                    reason=TerminationReason.CONTEXT_ERROR,
+                    stage="context",
+                    error=error,
+                )
             self._trace_recorder.record(
                 "iteration_started",
                 session_id=request.session_id,
@@ -72,7 +84,19 @@ class AgentLoop:
                 iteration=iteration,
                 message_count=len(messages),
             )
-            decision = self._llm_client.decide(messages)
+            try:
+                decision = self._llm_client.decide(messages)
+            # LLM 适配器可能抛出厂商 SDK 的不同异常，应用层在此统一收口，
+            # 但不会把失败伪装成成功或丢弃原始错误语义。
+            except Exception as error:  # noqa: BLE001
+                return self._terminate_after_dependency_error(
+                    request=request,
+                    trace_id=trace_id,
+                    iteration=iteration,
+                    reason=TerminationReason.LLM_ERROR,
+                    stage="llm",
+                    error=error,
+                )
 
             if isinstance(decision, FinalAnswerDecision):
                 result = RunResult(
@@ -100,6 +124,36 @@ class AgentLoop:
             trace_id=trace_id,
             termination_reason=TerminationReason.MAX_ITERATIONS,
             iterations=self._config.max_iterations,
+        )
+        self._record_termination(result)
+        return result
+
+    def _terminate_after_dependency_error(
+        self,
+        *,
+        request: RunRequest,
+        trace_id: str,
+        iteration: int,
+        reason: TerminationReason,
+        stage: str,
+        error: Exception,
+    ) -> RunResult:
+        """记录依赖失败的公开摘要，并返回结构化终止结果。"""
+
+        self._trace_recorder.record(
+            "dependency_failed",
+            session_id=request.session_id,
+            trace_id=trace_id,
+            iteration=iteration,
+            stage=stage,
+            error_type=type(error).__name__,
+            error_message=str(error),
+        )
+        result = RunResult(
+            session_id=request.session_id,
+            trace_id=trace_id,
+            termination_reason=reason,
+            iterations=iteration,
         )
         self._record_termination(result)
         return result

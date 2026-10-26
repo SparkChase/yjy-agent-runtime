@@ -28,7 +28,7 @@ class StubContextProvider:
         self,
         request: RunRequest,
         tool_results: Sequence[ToolResult],
-    ) -> Sequence:
+    ) -> Sequence[Message]:
         self.seen_results.append(tuple(tool_results))
         messages = [Message(MessageRole.USER, request.user_input)]
         messages.extend(
@@ -73,6 +73,26 @@ class InMemoryTraceRecorder:
 
     def record(self, event: str, **attributes: object) -> None:
         self.events.append((event, attributes))
+
+
+class FailingContextProvider:
+    """模拟 Context 依赖失败。"""
+
+    def build(
+        self,
+        request: RunRequest,
+        tool_results: Sequence[ToolResult],
+    ) -> Sequence[Message]:
+        del request, tool_results
+        raise RuntimeError("context unavailable")
+
+
+class FailingLLMClient:
+    """模拟 LLM 依赖失败。"""
+
+    def decide(self, messages: Sequence[Message]) -> AgentDecision:
+        del messages
+        raise TimeoutError("llm timed out")
 
 
 def make_loop(
@@ -182,3 +202,49 @@ def test_loop_config_rejects_non_positive_limit() -> None:
         assert "at least 1" in str(error)
     else:
         raise AssertionError("LoopConfig should reject zero max_iterations")
+
+
+def test_loop_returns_context_error_and_records_original_error() -> None:
+    trace = InMemoryTraceRecorder()
+    loop = AgentLoop(
+        context_provider=FailingContextProvider(),
+        llm_client=FakeLLMClient([]),
+        tool_executor=StubToolExecutor(),
+        trace_recorder=trace,
+    )
+
+    result = loop.run(RunRequest("session-a", "你好"))
+
+    assert result.termination_reason is TerminationReason.CONTEXT_ERROR
+    assert result.iterations == 1
+    assert trace.events[-2] == (
+        "dependency_failed",
+        {
+            "session_id": "session-a",
+            "trace_id": result.trace_id,
+            "iteration": 1,
+            "stage": "context",
+            "error_type": "RuntimeError",
+            "error_message": "context unavailable",
+        },
+    )
+    assert trace.events[-1][1]["reason"] == "context_error"
+
+
+def test_loop_returns_llm_error_and_records_original_error() -> None:
+    trace = InMemoryTraceRecorder()
+    loop = AgentLoop(
+        context_provider=StubContextProvider(),
+        llm_client=FailingLLMClient(),
+        tool_executor=StubToolExecutor(),
+        trace_recorder=trace,
+    )
+
+    result = loop.run(RunRequest("session-a", "你好"))
+
+    assert result.termination_reason is TerminationReason.LLM_ERROR
+    assert result.iterations == 1
+    assert trace.events[-2][1]["stage"] == "llm"
+    assert trace.events[-2][1]["error_type"] == "TimeoutError"
+    assert trace.events[-2][1]["error_message"] == "llm timed out"
+    assert trace.events[-1][1]["reason"] == "llm_error"
