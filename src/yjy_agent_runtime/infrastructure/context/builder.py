@@ -5,7 +5,11 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import ClassVar
 
-from yjy_agent_runtime.agent.ports import HistorySummarizer, SessionStore
+from yjy_agent_runtime.agent.ports import (
+    HistorySummarizer,
+    SessionStore,
+    ToolDefinition,
+)
 from yjy_agent_runtime.domain import (
     Message,
     MessageRole,
@@ -14,7 +18,6 @@ from yjy_agent_runtime.domain import (
     SessionSummary,
     ToolResult,
 )
-from yjy_agent_runtime.infrastructure.tools import ToolDefinition
 
 
 @dataclass(frozen=True, slots=True)

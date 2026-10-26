@@ -37,24 +37,26 @@ YJY Agent Runtime 是一个从零实现的最小 Agent Runtime 教学项目。�
 
 ```text
 src/yjy_agent_runtime/
-├── domain/                 # 稳定领域对象和不变量
-├── agent/                  # AgentLoop 和应用端口
-├── infrastructure/
-│   ├── context/            # Context、历史选择和压缩
-│   ├── llm/                # OpenAI-compatible HTTP 适配器
-│   ├── session/            # 进程内 SessionStore
-│   ├── tools/              # 工具注册、校验和执行
-│   └── trace/              # 结构化事件和脱敏 Recorder
-└── interfaces/             # CLI 入口
+├── domain/                 # 领域层：稳定领域对象和不变量
+├── agent/                  # 应用层：AgentLoop 和应用端口
+├── infrastructure/         # 基建层：以下端口的具体实现
+│   ├── context/            #   Context、历史选择和压缩
+│   ├── llm/                #   OpenAI-compatible HTTP 适配器
+│   ├── session/            #   内存与 JSON 文件 SessionStore
+│   ├── tools/              #   工具注册、校验和执行
+│   └── trace/              #   结构化事件和脱敏 Recorder
+└── interfaces/             # 入口层：CLI、配置加载与对象装配
 ```
 
 依赖方向保持为：
 
 ```text
-基础设施层 -> 应用层 -> 领域层
+interfaces -> infrastructure -> agent -> domain
 ```
 
-领域层不依赖具体模型 SDK、数据库或命令行实现。
+领域层不依赖具体模型 SDK、数据库或命令行实现；该方向由
+[tests/test_architecture.py](tests/test_architecture.py) 静态校验。逐层职责、Session
+如何流转、Context 如何组装见 [docs/architecture-layers.md](docs/architecture-layers.md)。
 
 ## 安装
 

@@ -1,43 +1,15 @@
-"""工具协议、工具定义和注册表。"""
+"""工具注册表实现。
 
-from collections.abc import Mapping
-from dataclasses import dataclass, field
-from types import MappingProxyType
-from typing import Any, Protocol
+工具"长什么样"这一契约（`ToolDefinition` 与 `Tool` 协议）定义在应用层
+`yjy_agent_runtime.agent.ports`，因为 Context 和模型都要消费它。这里只保留
+基建实现：如何按唯一名称保存工具、如何查找和导出定义视图。
 
+为兼容既有导入路径，本模块继续 re-export `ToolDefinition` 与 `Tool`。
+"""
 
-@dataclass(frozen=True, slots=True)
-class ToolDefinition:
-    """向模型公开的工具元数据和参数 Schema。"""
+from yjy_agent_runtime.agent.ports import Tool, ToolDefinition
 
-    name: str
-    description: str
-    parameters: Mapping[str, Any] = field(default_factory=dict)
-    has_side_effects: bool = False
-
-    def __post_init__(self) -> None:
-        if not self.name:
-            raise ValueError("tool name must not be empty")
-        if not self.description:
-            raise ValueError("tool description must not be empty")
-        object.__setattr__(
-            self,
-            "parameters",
-            MappingProxyType(dict(self.parameters)),
-        )
-
-
-class Tool(Protocol):
-    """可由 Runtime 注册和调用的工具协议。"""
-
-    @property
-    def definition(self) -> ToolDefinition:
-        """返回用于注册和模型暴露的工具定义。"""
-        ...
-
-    def invoke(self, arguments: Mapping[str, Any]) -> str:
-        """使用已经过校验的参数执行工具。"""
-        ...
+__all__ = ["Tool", "ToolDefinition", "ToolRegistry"]
 
 
 class ToolRegistry:

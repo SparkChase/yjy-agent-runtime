@@ -4,8 +4,10 @@
 后续基础设施层通过实现这些协议接入 Agent Loop。
 """
 
-from collections.abc import Sequence
-from typing import Protocol
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
+from types import MappingProxyType
+from typing import Any, Protocol
 
 from yjy_agent_runtime.domain import (
     AgentDecision,
@@ -17,6 +19,50 @@ from yjy_agent_runtime.domain import (
     ToolResult,
     TraceEvent,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class ToolDefinition:
+    """工具对外的稳定契约：名称、描述、参数 Schema 和副作用标记。
+
+    这是"应用层契约"而不是基建实现：Context 需要把它注入系统提示，
+    注册表需要按它做参数校验，模型需要它来生成调用。把它放在端口层，
+    基建的 Context 与 Tool 实现就都只依赖抽象，不会互相绑定。
+    """
+
+    name: str
+    description: str
+    parameters: Mapping[str, Any] = field(default_factory=dict)
+    has_side_effects: bool = False
+
+    def __post_init__(self) -> None:
+        if not self.name:
+            raise ValueError("tool name must not be empty")
+        if not self.description:
+            raise ValueError("tool description must not be empty")
+        # 复制后包成只读映射，防止调用方在运行期间修改 Schema。
+        object.__setattr__(
+            self,
+            "parameters",
+            MappingProxyType(dict(self.parameters)),
+        )
+
+
+class Tool(Protocol):
+    """可由 Runtime 注册和调用的工具协议。
+
+    只做无副作用的输入序列化的工具实现 `invoke`；需要读写 Session 状态的
+    工具额外实现 `invoke_with_session`，由执行器显式传入 `session_id`。
+    """
+
+    @property
+    def definition(self) -> ToolDefinition:
+        """返回用于注册和模型暴露的工具定义。"""
+        ...
+
+    def invoke(self, arguments: Mapping[str, Any]) -> str:
+        """使用已经过校验的参数执行工具。"""
+        ...
 
 
 class ContextProvider(Protocol):
