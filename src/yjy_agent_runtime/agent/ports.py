@@ -30,6 +30,18 @@ class ContextProvider(Protocol):
         ...
 
 
+class HistorySummarizer(Protocol):
+    """将尚未覆盖的连续历史增量合并为公开摘要。"""
+
+    def summarize(
+        self,
+        previous_summary: str | None,
+        messages: Sequence[Message],
+    ) -> str:
+        """返回覆盖旧摘要和新增消息的完整替代摘要。"""
+        ...
+
+
 class LLMClient(Protocol):
     """将模型调用封装为与厂商无关的结构化决策。"""
 
