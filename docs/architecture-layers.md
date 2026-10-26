@@ -44,8 +44,8 @@ interfaces ──► infrastructure ──► agent ──► domain
 | 子包 | 实现 | 关键文件 |
 | --- | --- | --- |
 | `llm/` | OpenAI Chat Completions 兼容适配器，解析 JSON 决策 | `openai_compatible.py` |
-| `session/` | 进程内 Store 与 JSON 文件 Store，按 `session_id` 隔离 | `in_memory.py`、`file.py` |
-| `tools/` | 工具注册表、参数校验、超时执行和内置工具 | `registry.py`、`executor.py`、`builtin.py` |
+| `session/` | 进程内 Store 与 JSON 文件 Store，按 `session_id` 隔离 | `in_memory.py`、`file.py`、`invariants.py` |
+| `tools/` | 工具注册表、参数校验、按副作用分流的执行与内置工具 | `registry.py`、`executor.py`、`deadline.py`、`builtin.py` |
 | `context/` | 组装模型输入，做历史摘要与预算裁剪 | `builder.py` |
 | `trace/` | 结构化事件、递归脱敏与 JSONL 落盘 | `redaction.py`、`in_memory.py`、`jsonl.py`、`fanout.py` |
 
@@ -68,8 +68,10 @@ interfaces ──► infrastructure ──► agent ──► domain
 - `llm/openai_compatible.py`：HTTP 适配器、配置读取、分阶段超时、决策 JSON 解析。
 - `session/in_memory.py`：进程内 SessionStore 与 `SessionNotFoundError`。
 - `session/file.py`：JSON 文件 SessionStore、原子替换与 `SessionStorageError`。
+- `session/invariants.py`：工具交互一致性规则（调用/结果/消息互相对应、`call_id` 唯一）。
 - `tools/registry.py`：按唯一名称保存工具、查找、导出定义视图。
-- `tools/executor.py`：参数 Schema 校验、超时执行、结构化成功/失败结果。
+- `tools/executor.py`：参数 Schema 校验、按 `has_side_effects` 分流执行、结构化成功/失败结果与 `timeout_semantics`。
+- `tools/deadline.py`：协作式截止时间，供有副作用的工具在写入前放弃提交。
 - `tools/builtin.py`：`echo`、`calculator`、mock `search`、Session 级 `todo`。
 - `context/builder.py`：`ContextConfig`、抽取式摘要器与 `ContextBuilder`。
 - `trace/redaction.py`：敏感字段脱敏规则，内存版与文件版共用。
@@ -106,10 +108,11 @@ interfaces ──► infrastructure ──► agent ──► domain
 
 4a. 若为工具决策
    - tool_executor.execute(session_id, call)
-       ToolRegistry 查找 -> JSON Schema 校验 -> invoke / invoke_with_session
-       -> ToolResult(success 或 error)
-   - append_tool_interaction(session_id, call, result)
-   - append_message(TOOL, result.content, result.call_id)
+       ToolRegistry 查找 -> JSON Schema 校验
+       -> 无副作用: 线程超时 / 有副作用: 同步执行或协作式 Deadline
+       -> ToolResult(success 或 error, 含 timeout_semantics)
+   - append_tool_interaction(session_id, call, result, message)
+       一次快照写入调用、结果和 TOOL 消息
    - 记录 tool_started / tool_completed，进入下一轮
 
 4b. 若为最终回答
@@ -158,6 +161,7 @@ Session 是"当前对话的全部已确认事实"，由 `session_id` 唯一确�
 - Context 构建失败：`context_error`。
 - 工具执行器自身抛出异常：`tool_error`；可恢复的工具失败（未知工具、参数非法、
   工具内部异常、超时）会转为 `ToolResult(error)` 交给模型继续判断，而不是终止循环。
+  超时结果还带 `timeout_semantics`，说明“等待超时”之后是否可能仍有副作用。
 - 达到最大轮次：`max_iterations`。
 - 非法决策类型：`invalid_decision`。
 

@@ -87,14 +87,41 @@ GitHub remote 和 GitHub 提交不属于本次任务范围。
 
 验证：新增 4 个用例覆盖交互模式失败轮、异常轮、先失败后成功、`--max-iterations 0`；修复前后用探针脚本实测，同一场景的退出码从 `0 / 1` 变为 `1 / 2`；离线门禁 132 passed, 2 deselected。
 
+### 问题七：四个"已声明但未修"的坑
+
+现象：修复计划把四个问题标成"[未修复]"，代码里也留着"这是已知边界"的注释，
+于是它们既没有被修，也不再被当成缺陷报告。四个问题分别是：副作用工具超时后仍写入
+（P1-03）、一次工具交互分两次落盘（P2-01）、`calculator` 没有资源上限（P2-02）、
+集成测试没有驱动完整闭环（P1-06）。
+
+根因：不是判断错误。四个问题被排在计划的 Step 5-7，Step 1-4 完成后排期转向 CLI 与
+文档，没有明确 owner 重新认领；而"已知边界"写得太清楚，反而让它们看起来像已经
+处理过的取舍。
+
+解决（`8a747dd`、`661564c`、`f22ad98`、`692266f`）：
+
+- 执行器读 `has_side_effects`：副作用工具同步执行，或实现 `Deadline` 协作取消；
+  超时语义 `timeout_semantics` 进 `ToolResult`、Trace 与 JSON 快照。
+- `append_tool_interaction(session_id, call, result, message)` 一次快照写完三类
+  数据；`append_message` 拒绝单独追加 TOOL 消息；文件 Store 读取时校验旧快照。
+- `calculator` 四道闸门：表达式 200 字符、嵌套 32 层、指数 ±64、结果 1024 位 / 1e100，
+  指数检查发生在幂运算之前。
+- 集成测试改为真实 LLM + 真实注册表 + 真实 AgentLoop + 临时 Session 目录，
+  覆盖工具闭环、同 Session 追问、跨 Session 隔离和压缩后追问。
+
+验证：离线 `150 passed, 4 deselected`；真实 `grok-4.7` 下 integration
+`4 passed in 223.76s`，其中工具闭环 3 轮、`calculator`/`todo` 均成功、待办含
+`3973`。逐条根因、残余边界见 `docs/runtime-remediation-plan.md` 第 9 节。
+
 ## 4. 可复现验证命令
 
 ```bash
 uv run pytest -q
-uv run pytest -m integration -q
+uv run --env-file .env pytest -m integration -q
 uv run ruff check .
 uv run python scripts/verify_md_links.py
 uv run python scripts/verify_doc_budgets.py
 ```
 
 默认测试必须在无网络、无 API Key 时通过；integration 测试只有配置真实服务后才可能产生真实联调证据。
+

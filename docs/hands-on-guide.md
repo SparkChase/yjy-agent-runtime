@@ -413,7 +413,7 @@ PY
 | `LLMConfigurationError: LLM_BASE_URL must not be empty` | 当前目录没有 `.env`，或变量名写错 | 在项目根目录创建 `.env`，或 `--env-file` 指定                           |
 | `LLM service returned HTTP 401`                         | Key 无效或过期            | 换 Key；不要写进代码或 Git                                           |
 | `LLMNetworkError: LLM request timed out`                | 网络慢或网关排队             | 调大 `LLM_TIMEOUT_SECONDS`，或换网络                               |
-| `2 skipped`（`pytest -m integration`）                    | 没有把 `.env` 传进 pytest | `uv run --env-file .env pytest -m integration -q`           |
+| `4 skipped`（`pytest -m integration`）                    | 没有把 `.env` 传进 pytest | `uv run --env-file .env pytest -m integration -q`           |
 | `UnicodeEncodeError: ... surrogates not allowed`        | 终端/输入法把非法 UTF-8 字节解码成 `\udcXX` | 入口现在会提示“输入包含无法解码的字符”；把终端编码设为 UTF-8 后重试 |
 | `context_error`                                         | 单条输入超过 Context 预算    | 拆短输入；后续会加友好提示                                               |
 | `PermissionError: mkdir .../pytest-of-root`             | 沙箱不允许写系统临时目录         | `TMPDIR=/tmp/xxx uv run pytest -q --basetemp=/tmp/xxx/base` |
@@ -436,16 +436,25 @@ PY
 - [x] 长历史压缩后仍能回答 `ORANGE-42`
 - [x] `logs/<session>.jsonl` 存在，且没有 API Key
 - [x] `uv run pytest -q` 全绿
+- [x] `uv run --env-file .env pytest -m integration -q` 全绿（真实模型自主调工具、
+      同 Session 追问、跨 Session 隔离、压缩后追问）
 
 ---
 
 ## 9. 已知边界（先知道，不用现在修）
 
 1. 单条超长输入会 `context_error`（见 5.3）。
-2. 工具调用和工具消息分两次写 Session，进程在两次写之间崩溃会留下半条交互。
-3. 工具超时只是“停止等待”，后台线程可能继续执行；对 `todo` 有理论上的晚写风险。
-4. `search` 只有三条固定文档，是 mock，不是真实搜索。
-5. CLI 默认一次进程一条消息；`--interactive` 支持同进程多轮，但没有流式输出，每轮仍要等模型完整返回。
+2. `search` 只有三条固定文档，是 mock，不是真实搜索。
+3. CLI 默认一次进程一条消息；`--interactive` 支持同进程多轮，但没有流式输出，每轮仍要等模型完整返回。
+4. `calculator` 有四道资源闸门（表达式 200 字符、嵌套 32 层、指数 ±64、结果
+   1024 位 / 1e100）；`2**100` 这类合法但超限的表达式会被明确拒绝，而不是慢慢算。
+5. 有副作用的工具默认**同步执行、不设超时**：宁可慢，也不谎报“已取消”。需要
+   超时的副作用工具要实现 `invoke_with_session_deadline`，在写入前调用
+   `deadline.raise_if_expired()`。
+
+> 2026-10-27 更新：原先列在这里的“工具调用与工具消息分两次写”和“超时后仍可能
+> 晚写”两条已经修掉，不再是边界。根因、改法和证据见
+> [runtime-remediation-plan.md](runtime-remediation-plan.md) 第 9 节。
 
 这些都不影响题目要求的演示，但读代码时会遇到，先在这里说明，避免误以为是 bug。
 

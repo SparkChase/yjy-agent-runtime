@@ -22,8 +22,8 @@ YJY Agent Runtime 是一个从零实现的最小 Agent Runtime 教学项目。�
 
 - 领域模型和构造期约束：消息、工具调用、工具结果、Session、决策和终止原因。
 - 显式线性 Agent Loop：直接回答、多工具调用、最大轮次、Context/LLM/工具错误和非法决策终止。
-- 工具系统：注册表、唯一名称、JSON Schema 参数校验、未知工具、异常结果、结果大小限制，以及 `calculator`、mock `search`、Session-scoped `todo` 和 `echo`。
-- Session：消息、工具交互、待办和摘要元数据按 `session_id` 隔离；支持进程内存储和 JSON 文件恢复。
+- 工具系统：注册表、唯一名称、JSON Schema 参数校验、未知工具、异常结果、结果大小限制，以及 `calculator`、mock `search`、Session-scoped `todo` 和 `echo`。执行器按 `has_side_effects` 分流：副作用工具同步执行或走协作式截止时间，并在 `ToolResult` 与 Trace 中记录 `timeout_semantics`，不会出现“已报超时、稍后又写入”。`calculator` 限制表达式长度、嵌套深度、指数与结果规模，`9**9**9` 会立即失败。
+- Session：消息、工具交互、待办和摘要元数据按 `session_id` 隔离；支持进程内存储和 JSON 文件恢复。一次工具交互的调用、结果和 TOOL 消息在同一次原子替换中落盘。
 - Context：系统约束、工具定义、最近历史、工具结果预算和增量历史摘要。
 - Trace：`session_id`、`run_id`、`trace_id`、轮次、LLM/工具耗时、工具参数与结果摘要、终止原因，支持 JSONL 落盘和递归敏感字段脱敏。
 - OpenAI Chat Completions 兼容适配器：从环境变量读取配置，区分网络、服务和响应解析错误。
@@ -167,15 +167,18 @@ uv run python scripts/verify_doc_budgets.py
 uv run pytest -q
 ```
 
-当前默认测试包含领域约束、Agent Loop 正常和异常路径、工具 Schema、未知工具、Session 隔离、Context 预算和增量压缩、Trace 脱敏、LLM 适配器错误分类，以及一个使用 `httpx.MockTransport` 的完整闭环测试。
+当前默认测试包含领域约束、Agent Loop 正常和异常路径、工具 Schema、未知工具、Session 隔离、Context 预算和增量压缩、Trace 脱敏、LLM 适配器错误分类、工具超时语义与原子写入，以及一个使用 `httpx.MockTransport` 的完整闭环测试。
 
 真实 LLM 测试被标记为 `integration`，没有配置时会跳过：
 
 ```bash
-uv run pytest -m integration -q
+uv run --env-file .env pytest -m integration -q
 ```
 
-因此，Mock 闭环通过不等于已经完成真实供应商联调；真实联调必须在配置有效的环境中单独执行并记录结果。
+这些用例用真实模型驱动完整闭环：自主调用 `calculator` 与 `todo` 并给出含 `3973`
+的最终回答、同 Session 追问待办、另一 Session 完全隔离、压缩后追问 `ORANGE-42`。
+它们会真实产生费用，所以默认门禁排除 `integration`；Mock 闭环通过不等于真实
+供应商联调通过，两者都要在有效配置下分别执行并记录结果。
 
 ## 开发计划
 

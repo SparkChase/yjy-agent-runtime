@@ -1099,7 +1099,7 @@ detail = re.sub(r"(?i)(bearer\s+)[^\s\"']+", r"\1[REDACTED]", detail)
 
 > 还有一个不在计划里的小修：终端把非法 UTF-8 字节按 `surrogateescape` 解码会产生 `\udcXX`，这种字符无法再编码成 UTF-8，会在写 Session 文件时才炸。现在领域对象构造期就拒绝，错误提前到“根本进不了系统”。
 
-### 8.2 还没验证的一件事：真实集成测试
+### 8.2 曾经没验证的一件事：真实集成测试（现已验证）
 
 原来 `tests/integration/` 只有 2 个用例：一个单次决策，一个压缩后追问。它们都没有驱动完整工具闭环——其中一个的 `tool_executor=UnusedTools()`，被调用就 `AssertionError`。
 
@@ -1111,17 +1111,26 @@ Mock 闭环能证明代码路径通，**不能证明模型真的会按协议调�
 | 同 Session 追问 + 跨 Session 隔离 | 同 Session 能答出之前写入的待办；另一个 Session 的回答**不含**它 |
 | 预置长历史后追问早期事实 | 回答含 `ORANGE-42`，`prompt_chars ≤ 预算` |
 
-但有一件事必须说清楚：**这三个用例我没有在真实 Key 的环境里跑过。**
-
-默认门禁会排除 `integration` 标记，所以前面那个“150 个测试通过”**不包含它们**。按本仓库的规矩，没跑过的测试不能写成通过——这条比多报几个数字重要。
-
-要真跑是这条命令，会真实产生费用：
+写完这三个用例时它们还没在真实 Key 下跑过，所以我当时没有把它们写成“通过”。后来用真实配置补跑了：
 
 ```bash
-uv run --env-file .env pytest -m integration -q
+uv run --locked --env-file .env pytest -m integration -q
+# 4 passed in 223.76s（模型 grok-4.7）
 ```
 
-通过标准：输出模型名、耗时、工具调用次数、Trace 路径，不输出 Key；三个场景全绿。任一失败时保留原始错误和 Trace，**不用重试或 Mock 伪造成功**。
+关键证据（`-s` 打印，不含任何密钥）：
+
+```text
+场景一 tool_calls = ['calculator', 'todo'] / status = ['success', 'success']
+       todos = ['The result of 137 * 29 is 3973'] / iterations = 3 / final_answer
+场景二 follow_up_answer = "1. 137 * 29 计算结果：3973"
+场景三 session_b answer = "当前没有待办"（不含 3973，隔离成立）
+场景四 压缩后追问回答含 ORANGE-42，prompt_chars ≤ 12000
+```
+
+默认门禁仍排除 `integration`，所以前面那个“150 个测试通过”**不包含它们**——离线
+门禁证明代码自洽，这四条才证明模型愿意按协议工作。真实调用产生费用，任一失败时
+保留原始错误和 Trace，**不用重试或 Mock 伪造成功**。
 
 **为什么这条要单独拎出来讲**：因为它是唯一一条“我的系统要和真实模型对赌”的测试。其他 150 个测试证明我的代码自洽；这一条才证明模型愿意按我设计的协议工作。
 
@@ -1262,6 +1271,6 @@ TMPDIR=/tmp/yjy-pytest uv run pytest -q --basetemp=/tmp/yjy-pytest/base
 
 - [分层与数据流](architecture-layers.md)：四层职责、Session 如何流转、Context 如何组装
 - [上手指南](hands-on-guide.md)：按顺序跑起来再读代码，附 13 步阅读顺序
-- [修复与验收计划](runtime-remediation-plan.md)：第八节问题的原始来源与复现路径。注意该文档仍把若干条目记为“未修复”，实际已在后续提交中修完，尚未同步
+- [修复与验收计划](runtime-remediation-plan.md)：问题清单、验收标准，以及第 9 节的补修记录（P1-03 / P2-01 / P2-02 / P1-06 的根因、改法、证据与残余边界）
 - [运行审计](runtime-audit.md)：需求验收记录与已复现问题
 - [开发计划](development-plan.md)：阶段划分与执行记录

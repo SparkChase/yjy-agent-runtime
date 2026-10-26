@@ -2,6 +2,10 @@
 
 编写日期：2026-10-26。
 
+> **2026-10-27 更新**：P1-03、P1-06、P2-01、P2-02 已修复、补测试并提交，逐条证据见
+> 第 9 节。正文保留当时的判断与验收标准，只把状态从"未修复"改为"已修复"，
+> 便于对照"计划要求"和"实际交付"。
+
 本计划只描述问题、修复方案和验收标准，不宣称任何未完成的修复已经生效。计划基于当前工作区
 `7d13d36` 及其未提交修改。当前工作区已有 6 个修改文件和未跟踪的
 `docs/runtime-audit.md`，实施时必须保留这些改动，不得覆盖或回滚。
@@ -138,7 +142,7 @@ interfaces ──► infrastructure ──► agent ──► domain
 - 模型 Context 中能明确区分 `success` 与 `error`，并看到对应工具名和参数。
 - 真实 LLM 在一次任务中连续调用至少两个工具后，最终回答能引用工具结果。
 
-### P1-03 [未修复]：工具超时后仍可能发生副作用
+### P1-03 [已修复]：工具超时后仍可能发生副作用
 
 现象：
 
@@ -158,6 +162,10 @@ interfaces ──► infrastructure ──► agent ──► domain
 - 构造延迟写入的副作用工具，执行器超时后等待超过工具延迟，断言待办仍为空。
 - 无副作用慢工具仍返回结构化 `TimeoutError`。
 - 测试覆盖同步副作用路径、协作取消路径和纯工具超时路径。
+
+实施结果（2026-10-27，`8a747dd`）：`ToolResult.timeout_semantics` 区分
+`synchronous` / `cooperative` / `abandoned_safe`，Trace 同步记录；测试见
+`tests/test_tool_executor.py` 与 `tests/test_builtin_tools.py`。详见 9.1。
 
 ### P1-04 [已修复]：CLI 配置入口和默认超时不可用
 
@@ -202,7 +210,7 @@ interfaces ──► infrastructure ──► agent ──► domain
 - 未配置时执行 `uv run pytest -m integration -q`，明确 skip 并说明原因。
 - 配置有效时执行真实入口，测试真实通过。
 
-### P1-06 [未修复]：真实集成测试没有驱动 Agent Loop
+### P1-06 [已修复]：真实集成测试没有驱动 Agent Loop
 
 现象：
 
@@ -225,6 +233,9 @@ interfaces ──► infrastructure ──► agent ──► domain
 - `uv run --env-file .env pytest -m integration -q` 真实通过。
 - 测试输出包含真实模型标识、耗时、工具调用次数和 Trace 路径；不输出 API Key。
 - 任一场景失败时保留原始错误和 Trace，不用 Mock 或重试伪造成功。
+
+实施结果（2026-10-27，`692266f`）：真实 `grok-4.7` 下 4 passed（单次决策、
+工具闭环、追问与隔离、压缩追问），详见 9.4。
 
 ### P1-07 [已修复]：CLI Trace 不可见且信息不完整
 
@@ -249,7 +260,7 @@ interfaces ──► infrastructure ──► agent ──► domain
 - 人为注入 `api_key`、`token`、`cookie` 等字段，文件中只出现 `[REDACTED]`。
 - Trace 写入失败时 CLI 返回非零退出码并给出可诊断错误。
 
-### P2-01 [未修复]：Session 工具交互不是原子写入
+### P2-01 [已修复]：Session 工具交互不是原子写入
 
 现象：
 
@@ -268,7 +279,11 @@ interfaces ──► infrastructure ──► agent ──► domain
 - 模拟第二次写入失败时，不出现半条交互。
 - 两个 Session 的工具数据仍然完全隔离。
 
-### P2-02 [未修复]：计算工具存在资源耗尽风险
+实施结果（2026-10-27，`661564c`）：`append_tool_interaction(session, call, result,
+message)` 一次快照写入三类数据；`append_message` 拒绝单独追加 TOOL 消息；文件
+Store 读取时校验旧快照。详见 9.2。
+
+### P2-02 [已修复]：计算工具存在资源耗尽风险
 
 现象：
 
@@ -284,6 +299,9 @@ interfaces ──► infrastructure ──► agent ──► domain
 - 正常算术通过。
 - 超长表达式、超大指数和非法语法快速失败。
 - 测试不会因资源耗尽而卡住。
+
+实施结果（2026-10-27，`f22ad98`）：表达式 200 字符、嵌套 32 层、指数绝对值 64、
+整数结果 1024 位 / 浮点 1e100；`9**9**9` 在算指数时即被拒绝。详见 9.3。
 
 ### P2-03 [部分修复]：文档与代码能力不一致
 
@@ -317,10 +335,10 @@ interfaces ──► infrastructure ──► agent ──► domain
 | 2 | 配置与 CLI | 已完成 | `ac76cae`、`70f21ba` |
 | 3 | Trace | 已完成 | `d60f849`、`f324ad8`、`aa620fc`、`19e3cfa` |
 | 4 | Context 压缩 | 已完成 | `e57a872` |
-| 5 | 工具执行 | 未开始 | 预期 `fix(tools): 修正超时副作用与计算边界` |
-| 6 | Session 原子写 | 未开始 | 预期 `fix(session): 原子保存工具调用与结果` |
-| 7 | 测试矩阵 | 部分完成（Trace/CLI/配置/架构测试已随各步补齐；真实端到端未做） | 预期 `test: 补齐真实 LLM 与异常路径验收` |
-| 8 | 文档与真实验收 | 部分完成（逐层与逐文件文档已写；最终真实验收未做） | 预期 `docs: 记录真实 LLM 验收结果` |
+| 5 | 工具执行（P1-03、P2-02） | 已完成 | `8a747dd`、`f22ad98` |
+| 6 | Session 原子写（P2-01） | 已完成 | `661564c` |
+| 7 | 测试矩阵（P1-06） | 已完成 | `692266f` |
+| 8 | 文档与真实验收 | 已完成（四个坑的证据与残余边界见第 9 节） | 本次文档提交 |
 
 现有未提交修改不属于本计划，不应混入上述提交。若这些修改与某项修复重叠，先由用户确认其归属，
 再按功能拆分提交。
@@ -356,10 +374,10 @@ interfaces ──► infrastructure ──► agent ──► domain
 
 ```text
 uv run --locked ruff check .                 # 通过
-uv run --locked pytest -q                    # 123 passed, 2 deselected
+uv run --locked pytest -q                    # 150 passed, 4 deselected
 uv run --locked python scripts/verify_md_links.py     # 通过
 uv run --locked python scripts/verify_doc_budgets.py  # 通过
-uv run --locked --env-file .env pytest -m integration -q   # 2 passed（单次决策 + 压缩后追问）
+uv run --locked --env-file .env pytest -m integration -q   # 4 passed（见 9.4）
 ```
 
 ## 6. 验收矩阵
@@ -496,3 +514,142 @@ Mock 测试只能作为回归门禁，不能计入真实 LLM 验收通过项。
 - 默认门禁已是 `pytest -q`（自动排除 integration）；真实测试用 `uv run --locked --env-file .env pytest -m integration -q`。
 - 真实验收会真实产生费用，必须执行。
 - 每完成一个小功能立即独立提交，提交前看 `git status --short` 与 diff，不使用 `git add -A`。
+
+## 9. 2026-10-27 补修记录：四个遗留坑
+
+### 9.0 为什么这四个坑当时没修
+
+不是"判断错了"，也不是"修不了"，而是三个原因叠在一起：
+
+1. **排期靠后**。计划把修复拆成 8 步，Step 1-4（架构清理、配置与 CLI、Trace、
+   Context 压缩）先落地；P1-03 属于 Step 5（工具执行），P2-01 属于 Step 6
+   （Session 原子写），P2-02 同属 Step 5，P1-06 属于 Step 7（测试矩阵）。
+   Step 1-4 完成后，后续提交转向 CLI 交互、耗时汇总与文档，Step 5-7 没有
+   重新认领，计划里的"[未修复]"就一直留在表格里。
+2. **没有明确 owner**。计划写清了改法和验收标准，但没有指派谁在哪一步动手；
+   "待办清单里的一条"很容易被当成"已经安排好了"。
+3. **"已知边界"反而降低了被发现的机会**。`executor.py` 的超时注释、`loop.py`
+   的两次写注释、`hands-on-guide.md` 的"已知边界"都在解释这四个问题。解释得
+   越清楚，越像"已经处理过"，越不会被再次翻出来。
+
+这次的处置顺序是：**先修代码，再删掉那些解释性注释和"已知边界"条目，最后把
+根因、改法、证据和残余边界写进本文档**。同一句话如果既出现在"已知边界"里、
+又出现在"待修复计划"里，它就会长期存在；只有把它变成"已修复 + 证据 + 残余
+边界"，才算真正结清。
+
+### 9.1 P1-03 副作用工具超时后仍然写入（`8a747dd`）
+
+- **根因**：执行器对所有工具统一用 `Thread + join(timeout)`。`join` 只停止等待，
+  不停止线程；而 `has_side_effects` 只是发给模型看的元数据，执行器从未读过它。
+- **改法**：按副作用分流，并让语义可观察。
+  - `has_side_effects=True` 且实现了 `invoke_with_session_deadline`：工作线程 +
+    `Deadline`，工具在写入前调用 `raise_if_expired()` 放弃提交 → `cooperative`。
+  - `has_side_effects=True` 但没有协作能力：**调用线程同步执行，不设超时**。
+    慢就是慢，但不会出现"已报超时、稍后却写入" → `synchronous`。
+  - 无副作用：保留线程超时 → `abandoned_safe`（线程可能还活着，但按约定不改外部状态）。
+  - `TimeoutSemantics` 随 `ToolResult` 返回，写入 JSON 快照，并落到
+    `tool_completed` Trace 的 `timeout_semantics` 字段。
+- **测试**：`tests/test_tool_executor.py` 覆盖三条路径（同步副作用、协作取消、
+  纯工具超时语义）；`tests/test_builtin_tools.py` 的
+  `test_todo_cannot_write_after_the_executor_reported_a_timeout` 用慢速 Store
+  复现原始缺陷：超时后等待 0.1 秒，断言待办只有一条且只写了一次；
+  `tests/test_loop_trace.py` 断言语义真的进了 Trace。
+- **残余边界**：同步执行意味着副作用工具**没有超时保护**，一个卡死的副作用工具
+  会阻塞整轮运行。需要超时就必须实现 `invoke_with_session_deadline`；协作取消
+  依赖工具自觉在写入前检查截止时间，执行器无法强制。当前 `TodoTool` 是本地
+  JSON 追加，选择同步路径。
+
+### 9.2 P2-01 一次工具交互分两次写入（`661564c`）
+
+- **根因**：`append_tool_interaction`（结构化调用/结果）与 `append_message(TOOL)`
+  各写一次快照。单次写是原子的，但一次交互跨了两次写，中间崩溃就留下半条。
+- **改法**：
+  - `append_tool_interaction(session_id, call, result, message)` 一次构造完整
+    快照，文件 Store 仍然只有一次 `临时文件 + fsync + os.replace`。
+  - 新增 `infrastructure/session/invariants.py`，把一致性规则收敛成纯函数：
+    调用与结果必须同名同 ID、工具消息必须指向同一次调用且内容一致、`call_id`
+    不得重复。
+  - `append_message` 拒绝单独追加 TOOL 消息——"半条交互"在接口层不可表示。
+  - 文件 Store 读取时校验旧快照：如果历史里已经存在半条交互，直接报
+    `SessionStorageError`，而不是把残缺历史交给模型。
+- **测试**：`tests/test_session_store.py`（三类数据同时写入、拒绝单独 TOOL 消息、
+  消息必须对应调用、重复 `call_id` 被拒）；`tests/test_file_session_store.py`
+  （一次交互只落一次盘、注入 `os.replace` 失败后磁盘仍是写入前快照、手写半条
+  交互快照被读取校验拒绝）；`tests/test_agent_loop.py` 断言一次调用只产生一组
+  完整记录。
+- **残余边界**：读取校验只**拒绝**旧的不一致快照，不做自动修复。真遇到这种文件，
+  需要人工确认后逐个删除对应 Session 文件（文件名是 `session_id` 的 sha256）。
+
+### 9.3 P2-02 calculator 没有资源上限（`f22ad98`）
+
+- **根因**：只做了语法白名单（受限 AST），没有资源边界。`9**9**9` 语法完全合法，
+  但指数本身是 387420489，足以长时间占满 CPU。
+- **改法**：四道闸门，任何一道超限立即抛错，不做"先算完再判断"。
+  | 闸门 | 上限 | 挡住什么 |
+  | --- | --- | --- |
+  | 表达式长度 | 200 字符 | 超长输入、批量拼接 |
+  | AST 嵌套深度 | 32 层 | 深递归、超长左结合链 |
+  | 指数绝对值 | 64 | `9**9**9`、`10**1000` |
+  | 结果规模 | 整数 1024 位 / 浮点 1e100 | 中间结果爆炸 |
+  关键细节：指数检查必须发生在**做幂运算之前**。`9**9**9` 会先算出指数
+  387420489，再被 64 的上限拒绝；如果先算 `9**387420489` 再检查结果，就已经晚了。
+- **测试**：`tests/test_builtin_tools.py` 覆盖正常算术（幂、除法、取模、负号）、
+  `9**9**9` 在 1 秒内失败、201 字符表达式被拒、40 项加法链被嵌套深度拒绝、
+  `(10**64)**64` 被结果位数拒绝。
+- **残余边界**：`2**100` 这类"合法但超过指数上限"的表达式也会被拒。这是刻意的
+  取舍：明确报错优于冒险计算；上限是类属性，需要时可在子类里调整。
+
+### 9.4 P1-06 集成测试没有驱动完整闭环（`692266f`）
+
+- **根因**：`tests/integration/test_llm_integration.py` 只有 2 个用例，一个只调
+  `client.decide()` 并断言"不是 None"，另一个压缩场景的 `tool_executor` 是
+  `UnusedTools()`，一旦模型真的调工具就直接 `AssertionError`。闭环测试则依赖
+  `MockTransport` 或预设决策——它们能证明代码路径通，不能证明模型会按协议调工具。
+- **改法**：真实 LLM + 真实 `ToolRegistry` + 真实 `RegistryToolExecutor` +
+  真实 `AgentLoop` + `JsonFileSessionStore(tmp_path)` + `JsonlTraceRecorder`，
+  三个场景：
+  1. 模型自主调用 `calculator` 与 `todo`，最终回答含 `3973`，Session 中两个
+     `ToolResult` 均为 `success`，待办含 `3973`，Trace 文件非空。
+  2. 同一 Session 追问待办，回答含 `3973`；另一个 Session 回答"当前没有待办"，
+     且不含 `3973`。
+  3. 预置 60 条长历史后追问早期事实，回答含 `ORANGE-42`，且 `prompt_chars ≤ 12000`。
+- **真实证据**（2026-10-27，模型 `grok-4.7`，真实付费调用）：
+
+  ```text
+  命令：uv run --locked --env-file .env pytest -m integration -q
+  结果：4 passed in 223.76s
+
+  场景一（单独复跑，74.5s）：
+    tool_calls      = ['calculator', 'todo']
+    tool_status     = ['success', 'success']
+    todos           = ['The result of 137 * 29 is 3973']
+    iterations      = 3
+    termination     = final_answer
+    answer          = "The result of 137 * 29 is 3973."
+
+  场景二/三（单独复跑，174.68s）：
+    session_a tool_calls = ['calculator', 'todo', 'todo']
+    follow_up_answer     = "1. 137 * 29 计算结果：3973"
+    session_b tool_calls = ['todo']
+    session_b answer     = "当前没有待办"
+  ```
+
+- **残余边界**：模型输出有随机性，断言只覆盖事实（数值、工具名、状态、终止原因、
+  Session 内容），不匹配措辞；真实调用产生费用，所以默认门禁排除 `integration`；
+  在禁止写系统临时目录的沙箱里需要额外加 `--basetemp <工作区内路径>`，否则
+  `tmp_path` 会在创建目录时失败（与代码无关）。
+
+### 9.5 修复后的门禁与提交
+
+| 提交 | 内容 |
+| --- | --- |
+| `8a747dd` | `fix(tools): 副作用工具不再在超时后晚写` |
+| `661564c` | `fix(session): 原子写入工具调用、结果与工具消息` |
+| `f22ad98` | `fix(tools): 限制 calculator 的表达式、嵌套、指数与结果规模` |
+| `692266f` | `test(integration): 用真实 LLM 驱动完整工具闭环` |
+
+```text
+uv run --locked ruff check .                              # 通过
+uv run --locked pytest -q                                 # 150 passed, 4 deselected
+uv run --locked --env-file .env pytest -m integration -q  # 4 passed in 223.76s
+```
