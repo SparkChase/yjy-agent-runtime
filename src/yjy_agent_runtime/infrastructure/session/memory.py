@@ -44,6 +44,7 @@ class InMemorySessionStore:
                 messages=(*current.messages, message),
                 tool_calls=current.tool_calls,
                 tool_results=current.tool_results,
+                todos=current.todos,
                 summary=current.summary,
             )
             self._sessions[session_id] = updated
@@ -66,6 +67,7 @@ class InMemorySessionStore:
                 messages=current.messages,
                 tool_calls=(*current.tool_calls, call),
                 tool_results=(*current.tool_results, result),
+                todos=current.todos,
                 summary=current.summary,
             )
             self._sessions[session_id] = updated
@@ -83,10 +85,34 @@ class InMemorySessionStore:
                 messages=current.messages,
                 tool_calls=current.tool_calls,
                 tool_results=current.tool_results,
+                todos=current.todos,
                 summary=summary,
             )
             self._sessions[session_id] = updated
             return updated
+
+    def append_todo(self, session_id: str, todo: str) -> Session:
+        """向指定 Session 追加一个非空待办。"""
+
+        if not todo:
+            raise ValueError("todo must not be empty")
+        with self._lock:
+            current = self._require(session_id)
+            updated = Session(
+                session_id=session_id,
+                messages=current.messages,
+                tool_calls=current.tool_calls,
+                tool_results=current.tool_results,
+                todos=(*current.todos, todo),
+                summary=current.summary,
+            )
+            self._sessions[session_id] = updated
+            return updated
+
+    def list_todos(self, session_id: str) -> tuple[str, ...]:
+        """返回指定 Session 的待办快照。"""
+
+        return self._require(session_id).todos
 
     def _require(self, session_id: str) -> Session:
         self._validate_session_id(session_id)

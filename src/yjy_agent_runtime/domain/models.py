@@ -3,6 +3,16 @@
 这些类型只描述 Runtime 中稳定的事实和约束，不依赖模型 SDK、数据库或
 命令行。将非法输入尽量阻挡在对象创建阶段，可以避免核心循环长期处理
 含义不清的普通字典。
+
+这里定义了整个 Agent Runtime 最基础的“事实对象”：
+- Message（包含系统、用户、助手、工具四种角色）
+- ToolCall（LLM 想调用的工具调用）
+- ToolResult（工具执行后的结构化结果，无论成功失败）
+- Session（完整 Session 快照，包含历史消息 + 摘要）
+- 各种 Decision 类型（LLM 最终决定是直接回答还是调用工具）
+
+所有这些都是不可变对象 + 后置校验，防止后面核心循环出 bug。
+
 """
 
 from collections.abc import Mapping
@@ -18,7 +28,7 @@ class MessageRole(StrEnum):
     SYSTEM = "system"
     USER = "user"
     ASSISTANT = "assistant"
-    TOOL = "tool"
+    TOOL = "tool"  # TOOL 角色有特殊字段 tool_call_id，这是为了把工具调用和结果一一对应。
 
 
 class TraceEventType(StrEnum):
@@ -61,20 +71,20 @@ class TraceEvent:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True) # 不可变对象 防止后面修改导致状态混乱
 class Message:
     """一条归属于当前 Session 的不可变消息。"""
 
     role: MessageRole
     content: str
-    tool_call_id: str | None = None
+    tool_call_id: str | None = None # tool_call_id 只在 TOOL 角色时有意义
 
     def __post_init__(self) -> None:
-        if not self.content:
+        if not self.content: # conetnt不能为空
             raise ValueError("message content must not be empty")
-        if self.role is MessageRole.TOOL and not self.tool_call_id:
+        if self.role is MessageRole.TOOL and not self.tool_call_id: # TOOL 消息必须有 tool_call_id
             raise ValueError("tool message requires tool_call_id")
-        if self.role is not MessageRole.TOOL and self.tool_call_id is not None:
+        if self.role is not MessageRole.TOOL and self.tool_call_id is not None: # 其他角色不能有 tool_call_id
             raise ValueError("only tool message may contain tool_call_id")
 
 
@@ -83,7 +93,7 @@ class SessionSummary:
     """历史压缩摘要及其覆盖范围元数据。"""
 
     content: str
-    covered_message_count: int
+    covered_message_count: int # 记录这个摘要覆盖到了第几条消息
 
     def __post_init__(self) -> None:
         if not self.content:
@@ -175,6 +185,7 @@ class Session:
     messages: tuple[Message, ...] = ()
     tool_calls: tuple[ToolCall, ...] = ()
     tool_results: tuple[ToolResult, ...] = ()
+    todos: tuple[str, ...] = ()
     summary: SessionSummary | None = None
 
     def __post_init__(self) -> None:

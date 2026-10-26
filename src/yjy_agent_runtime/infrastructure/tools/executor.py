@@ -59,7 +59,14 @@ class RegistryToolExecutor:
             )
 
         try:
-            content = self._invoke_with_timeout(tool, call.arguments)
+            if hasattr(tool, "invoke_with_session"):
+                content = self._invoke_with_timeout(
+                    tool,
+                    (session_id, call.arguments),
+                    session_aware=True,
+                )
+            else:
+                content = self._invoke_with_timeout(tool, call.arguments)
         except Exception as error:  # noqa: BLE001
             return self._error_result(
                 call,
@@ -87,14 +94,23 @@ class RegistryToolExecutor:
             content=self._limit_content(content),
         )
 
-    def _invoke_with_timeout(self, tool: object, arguments: object) -> Any:
+    def _invoke_with_timeout(
+        self,
+        tool: object,
+        arguments: object,
+        *,
+        session_aware: bool = False,
+    ) -> Any:
         """在守护线程中执行工具，超时后返回结构化错误。"""
 
         outcome: Queue[tuple[bool, Any]] = Queue(maxsize=1)
 
         def invoke() -> None:
             try:
-                result = tool.invoke(arguments)  # type: ignore[attr-defined]
+                if session_aware:
+                    result = tool.invoke_with_session(*arguments)  # type: ignore[attr-defined]
+                else:
+                    result = tool.invoke(arguments)  # type: ignore[attr-defined]
             except Exception as error:  # noqa: BLE001
                 outcome.put((False, error))
             else:
