@@ -106,11 +106,17 @@ class MockSearchTool:
         return self._definition
 
     def invoke(self, arguments: Mapping[str, Any]) -> str:
-        query = str(arguments["query"]).casefold()
+        query = str(arguments["query"]).casefold().strip()
+        # 按空格切词，任一关键词命中即可。这样 "session 隔离" 能命中
+        # 同时包含 session 和 隔离 的文档，而不是要求整串连续出现。
+        tokens = [token for token in query.split() if token] or [query]
         matches = [
             f"{title}: {content}"
             for title, content in self._documents
-            if query in title.casefold() or query in content.casefold()
+            if any(
+                token in title.casefold() or token in content.casefold()
+                for token in tokens
+            )
         ]
         return "\n".join(matches) if matches else "mock search 未找到匹配内容"
 

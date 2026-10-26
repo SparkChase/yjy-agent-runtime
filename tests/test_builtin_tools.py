@@ -107,6 +107,22 @@ def test_mock_search_is_deterministic_and_has_no_network_dependency() -> None:
     assert "Session" in result.content
 
 
+def test_mock_search_matches_multiple_keywords() -> None:
+    store = InMemorySessionStore()
+    registry = ToolRegistry()
+    register_builtin_tools(registry, store)
+    executor = RegistryToolExecutor(registry)
+
+    result = executor.execute(
+        "session-a",
+        ToolCall("call-1", "search", {"query": "session 隔离"}),
+    )
+
+    assert result.status is ToolResultStatus.SUCCESS
+    assert "Session" in result.content
+    assert "隔离" in result.content
+
+
 def test_todo_is_scoped_to_session_id() -> None:
     store = InMemorySessionStore()
     store.get_or_create("session-a")
