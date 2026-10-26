@@ -11,6 +11,8 @@ from yjy_agent_runtime.domain import (
     AgentDecision,
     Message,
     RunRequest,
+    Session,
+    SessionSummary,
     ToolCall,
     ToolResult,
 )
@@ -41,6 +43,39 @@ class ToolExecutor(Protocol):
 
     def execute(self, session_id: str, call: ToolCall) -> ToolResult:
         """在指定 Session 中执行工具并返回结构化结果。"""
+        ...
+
+
+class SessionStore(Protocol):
+    """按显式 session_id 读取和更新 Session 状态。"""
+
+    def get(self, session_id: str) -> Session | None:
+        """读取 Session 快照；不存在时返回 None。"""
+        ...
+
+    def get_or_create(self, session_id: str) -> Session:
+        """读取 Session，不存在时创建空 Session。"""
+        ...
+
+    def append_message(self, session_id: str, message: Message) -> Session:
+        """向已存在的 Session 追加消息并返回新快照。"""
+        ...
+
+    def append_tool_interaction(
+        self,
+        session_id: str,
+        call: ToolCall,
+        result: ToolResult,
+    ) -> Session:
+        """原子追加相互关联的工具调用和结果。"""
+        ...
+
+    def set_summary(
+        self,
+        session_id: str,
+        summary: SessionSummary | None,
+    ) -> Session:
+        """设置或清除 Session 摘要元数据。"""
         ...
 
 

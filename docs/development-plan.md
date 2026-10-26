@@ -215,13 +215,13 @@
 
 ### 阶段四：Session
 
-- [ ] 定义 Session 和 SessionStore 协议。
-- [ ] 实现进程内 SessionStore。
-- [ ] 保存消息、工具调用、工具结果和摘要元数据。
-- [ ] 所有状态读写显式携带 `session_id`。
-- [ ] 覆盖不同 Session 隔离。
-- [ ] 覆盖同一 Session 连续追问。
-- [ ] 覆盖不存在 Session 的创建和恢复规则。
+- [x] 定义 Session 和 SessionStore 协议。
+- [x] 实现进程内 SessionStore。
+- [x] 保存消息、工具调用、工具结果和摘要元数据。
+- [x] 所有状态读写显式携带 `session_id`。
+- [x] 覆盖不同 Session 隔离。
+- [x] 覆盖同一 Session 连续追问。
+- [x] 覆盖不存在 Session 的创建和恢复规则。
 
 验收标准：
 

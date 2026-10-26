@@ -39,6 +39,20 @@ class Message:
 
 
 @dataclass(frozen=True, slots=True)
+class SessionSummary:
+    """历史压缩摘要及其覆盖范围元数据。"""
+
+    content: str
+    covered_message_count: int
+
+    def __post_init__(self) -> None:
+        if not self.content:
+            raise ValueError("session summary content must not be empty")
+        if self.covered_message_count < 1:
+            raise ValueError("covered message count must be at least 1")
+
+
+@dataclass(frozen=True, slots=True)
 class ToolCall:
     """LLM 请求 Runtime 执行的一次工具调用。"""
 
@@ -111,6 +125,28 @@ class ToolResult:
             raise ValueError("error tool result requires error_type")
         if self.status is ToolResultStatus.SUCCESS and self.error_type is not None:
             raise ValueError("successful tool result must not contain error_type")
+
+
+@dataclass(frozen=True, slots=True)
+class Session:
+    """一个 Session 的完整、不可变状态快照。"""
+
+    session_id: str
+    messages: tuple[Message, ...] = ()
+    tool_calls: tuple[ToolCall, ...] = ()
+    tool_results: tuple[ToolResult, ...] = ()
+    summary: SessionSummary | None = None
+
+    def __post_init__(self) -> None:
+        if not self.session_id:
+            raise ValueError("session id must not be empty")
+        if (
+            self.summary is not None
+            and self.summary.covered_message_count > len(self.messages)
+        ):
+            raise ValueError(
+                "summary cannot cover more messages than the session contains"
+            )
 
 
 class TerminationReason(StrEnum):
