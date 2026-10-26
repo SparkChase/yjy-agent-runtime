@@ -46,6 +46,19 @@ from .config import EnvFileError, prepare_environment
 # 未显式指定 --trace-file 时，Trace 落到该目录下按 Session 命名。
 DEFAULT_TRACE_DIR = Path("logs")
 
+# 终端把非法 UTF-8 字节按 surrogateescape 解码时会产生 \udcXX。
+# 这种字符无法再编码成 UTF-8，必须在进入 Runtime 前拦住。
+SURROGATE_INPUT_MESSAGE = (
+    "输入包含无法解码的字符（终端编码可能不是 UTF-8）。"
+    "请检查终端/输入法编码后重试。"
+)
+
+
+def _contains_surrogate(text: str) -> bool:
+    """判断输入是否含 lone surrogate（\ud800-\udfff）。"""
+
+    return any(0xD800 <= ord(char) <= 0xDFFF for char in text)
+
 
 def build_parser() -> argparse.ArgumentParser:
     """构建可测试的命令行参数解析器。"""
@@ -162,6 +175,18 @@ def main(argv: list[str] | None = None) -> int:
 
     args = build_parser().parse_args(argv)
 
+    # 一次性模式在装配任何依赖之前就校验输入，坏字符不会走到模型或 Session。
+    # 交互模式不在这里读 stdin，交给 _run_interactive 逐轮处理。
+    user_input: str | None = None
+    if not args.interactive:
+        user_input = (args.message or sys.stdin.readline()).strip()
+        if not user_input:
+            print("请输入非空消息。", file=sys.stderr)
+            return 2
+        if _contains_surrogate(user_input):
+            print(SURROGATE_INPUT_MESSAGE, file=sys.stderr)
+            return 2
+
     try:
         prepare_environment(
             env_file=args.env_file,
@@ -189,10 +214,7 @@ def main(argv: list[str] | None = None) -> int:
                     trace,
                     initial=args.message,
                 )
-            user_input = args.message or sys.stdin.readline().strip()
-            if not user_input:
-                print("请输入非空消息。", file=sys.stderr)
-                return 2
+            assert user_input is not None  # 非交互分支已在前面完成校验
             run_started = perf_counter()
             result = loop.run(RunRequest(args.session_id, user_input))
             elapsed_ms = (perf_counter() - run_started) * 1000
@@ -233,7 +255,13 @@ def _run_interactive(
     )
     _report_trace_path(trace.path)
 
-    pending = [initial] if initial else []
+    pending: list[str] = []
+    if initial:
+        if _contains_surrogate(initial):
+            print(SURROGATE_INPUT_MESSAGE, file=sys.stderr)
+        else:
+            pending.append(initial)
+
     while True:
         if pending:
             text = pending.pop(0)
@@ -247,6 +275,9 @@ def _run_interactive(
 
         text = text.strip()
         if not text:
+            continue
+        if _contains_surrogate(text):
+            print(SURROGATE_INPUT_MESSAGE, file=sys.stderr)
             continue
         if text in {"/exit", "/quit"}:
             break

@@ -414,6 +414,7 @@ PY
 | `LLM service returned HTTP 401`                         | Key 无效或过期            | 换 Key；不要写进代码或 Git                                           |
 | `LLMNetworkError: LLM request timed out`                | 网络慢或网关排队             | 调大 `LLM_TIMEOUT_SECONDS`，或换网络                               |
 | `2 skipped`（`pytest -m integration`）                    | 没有把 `.env` 传进 pytest | `uv run --env-file .env pytest -m integration -q`           |
+| `UnicodeEncodeError: ... surrogates not allowed`        | 终端/输入法把非法 UTF-8 字节解码成 `\udcXX` | 入口现在会提示“输入包含无法解码的字符”；把终端编码设为 UTF-8 后重试 |
 | `context_error`                                         | 单条输入超过 Context 预算    | 拆短输入；后续会加友好提示                                               |
 | `PermissionError: mkdir .../pytest-of-root`             | 沙箱不允许写系统临时目录         | `TMPDIR=/tmp/xxx uv run pytest -q --basetemp=/tmp/xxx/base` |
 | `search` 返回“未找到”                                        | 查询词和三条 mock 文档完全不匹配  | 换关键词，例如 `session`、`context`、`agent loop`                    |

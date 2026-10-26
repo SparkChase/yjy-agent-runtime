@@ -22,6 +22,22 @@ from types import MappingProxyType
 from typing import Any
 
 
+def _contains_surrogate(value: str) -> bool:
+    """判断字符串是否含 UTF-16 代理项（lone surrogate）。
+
+    终端把非法 UTF-8 字节按 ``surrogateescape`` 解码时会产生 ``\\udcXX``。
+    这种字符无法再编码成 UTF-8，写 Session 文件时会抛 UnicodeEncodeError。
+    在领域对象构造期拒绝它，比等到落盘时再炸更早、更清楚。
+    """
+
+    return any(0xD800 <= ord(char) <= 0xDFFF for char in value)
+
+
+def _ensure_no_surrogates(value: str, label: str) -> None:
+    if _contains_surrogate(value):
+        raise ValueError(f"{label} must not contain unicode surrogates")
+
+
 class MessageRole(StrEnum):
     """模型上下文中允许出现的消息角色。"""
 
@@ -87,6 +103,7 @@ class Message:
     def __post_init__(self) -> None:
         if not self.content:
             raise ValueError("message content must not be empty")
+        _ensure_no_surrogates(self.content, "message content")
         if self.role is MessageRole.TOOL and not self.tool_call_id:
             raise ValueError("tool message requires tool_call_id")
         if self.role is not MessageRole.TOOL and self.tool_call_id is not None:
@@ -103,6 +120,7 @@ class SessionSummary:
     def __post_init__(self) -> None:
         if not self.content:
             raise ValueError("session summary content must not be empty")
+        _ensure_no_surrogates(self.content, "session summary content")
         if self.covered_message_count < 1:
             raise ValueError("covered message count must be at least 1")
 
@@ -134,6 +152,7 @@ class FinalAnswerDecision:
     def __post_init__(self) -> None:
         if not self.answer:
             raise ValueError("final answer must not be empty")
+        _ensure_no_surrogates(self.answer, "final answer")
 
 
 @dataclass(frozen=True, slots=True)
@@ -176,6 +195,7 @@ class ToolResult:
             raise ValueError("tool result requires call id and tool name")
         if not self.content:
             raise ValueError("tool result content must not be empty")
+        _ensure_no_surrogates(self.content, "tool result content")
         if self.status is ToolResultStatus.ERROR and not self.error_type:
             raise ValueError("error tool result requires error_type")
         if self.status is ToolResultStatus.SUCCESS and self.error_type is not None:
@@ -230,6 +250,7 @@ class RunRequest:
             raise ValueError("session id must not be empty")
         if not self.user_input:
             raise ValueError("user input must not be empty")
+        _ensure_no_surrogates(self.user_input, "user input")
 
 
 @dataclass(frozen=True, slots=True)

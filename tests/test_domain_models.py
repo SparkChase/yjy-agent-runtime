@@ -97,3 +97,10 @@ def test_final_answer_decision_accepts_public_summary() -> None:
     )
 
     assert decision.answer == "结果是 42。"
+
+
+def test_message_rejects_lone_surrogate() -> None:
+    """终端编码错误产生的 \\udcXX 不能进入领域对象，否则写文件必炸。"""
+
+    with pytest.raises(ValueError, match="unicode surrogates"):
+        Message(MessageRole.USER, "a\udce3b")

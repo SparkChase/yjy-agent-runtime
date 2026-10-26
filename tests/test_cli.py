@@ -186,6 +186,35 @@ def test_format_timing_aggregates_llm_and_tool_durations() -> None:
     assert "轮次 1" in text
 
 
+def test_main_rejects_lone_surrogate_input(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """一次性模式应在装配依赖前拒绝无法编码的输入。"""
+
+    exit_code = cli.main(["--no-trace", "a\udce3b"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert "UTF-8" in captured.err
+
+
+def test_interactive_rejects_lone_surrogate_and_continues(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    loop = StubLoop()
+    monkeypatch.setattr(cli, "build_loop", lambda **_kwargs: loop)
+    inputs = iter(["a\udce3b", "正常", "/exit"])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(inputs))
+
+    exit_code = cli.main(["--interactive", "--no-trace", "--session-id", "chat"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert [request.user_input for request in loop.requests] == ["正常"]
+    assert "UTF-8" in captured.err
+
+
 def test_main_reports_missing_message(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
