@@ -1,0 +1,158 @@
+"""Agent Runtime 的核心领域对象。
+
+这些类型只描述 Runtime 中稳定的事实和约束，不依赖模型 SDK、数据库或
+命令行。将非法输入尽量阻挡在对象创建阶段，可以避免核心循环长期处理
+含义不清的普通字典。
+"""
+
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from enum import StrEnum
+from types import MappingProxyType
+from typing import Any
+
+
+class MessageRole(StrEnum):
+    """模型上下文中允许出现的消息角色。"""
+
+    SYSTEM = "system"
+    USER = "user"
+    ASSISTANT = "assistant"
+    TOOL = "tool"
+
+
+@dataclass(frozen=True, slots=True)
+class Message:
+    """一条归属于当前 Session 的不可变消息。"""
+
+    role: MessageRole
+    content: str
+    tool_call_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.content:
+            raise ValueError("message content must not be empty")
+        if self.role is MessageRole.TOOL and not self.tool_call_id:
+            raise ValueError("tool message requires tool_call_id")
+        if self.role is not MessageRole.TOOL and self.tool_call_id is not None:
+            raise ValueError("only tool message may contain tool_call_id")
+
+
+@dataclass(frozen=True, slots=True)
+class ToolCall:
+    """LLM 请求 Runtime 执行的一次工具调用。"""
+
+    call_id: str
+    name: str
+    arguments: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not self.call_id:
+            raise ValueError("tool call id must not be empty")
+        if not self.name:
+            raise ValueError("tool name must not be empty")
+        # 复制后再包成只读映射，防止调用方在运行期间悄悄修改参数。
+        object.__setattr__(self, "arguments", MappingProxyType(dict(self.arguments)))
+
+
+@dataclass(frozen=True, slots=True)
+class FinalAnswerDecision:
+    """LLM 已具备足够信息，可以结束循环并返回答案。"""
+
+    answer: str
+    decision_summary: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.answer:
+            raise ValueError("final answer must not be empty")
+
+
+@dataclass(frozen=True, slots=True)
+class ToolCallDecision:
+    """LLM 决定执行一个或多个工具后继续下一轮。"""
+
+    tool_calls: tuple[ToolCall, ...]
+    decision_summary: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.tool_calls:
+            raise ValueError("tool call decision requires at least one call")
+        call_ids = [call.call_id for call in self.tool_calls]
+        if len(call_ids) != len(set(call_ids)):
+            raise ValueError("tool call ids must be unique within one decision")
+
+
+type AgentDecision = FinalAnswerDecision | ToolCallDecision
+
+
+class ToolResultStatus(StrEnum):
+    """工具执行结果状态。失败结果仍会保留给 LLM 用于后续判断。"""
+
+    SUCCESS = "success"
+    ERROR = "error"
+
+
+@dataclass(frozen=True, slots=True)
+class ToolResult:
+    """一次工具调用的结构化结果。"""
+
+    call_id: str
+    tool_name: str
+    status: ToolResultStatus
+    content: str
+    error_type: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.call_id or not self.tool_name:
+            raise ValueError("tool result requires call id and tool name")
+        if not self.content:
+            raise ValueError("tool result content must not be empty")
+        if self.status is ToolResultStatus.ERROR and not self.error_type:
+            raise ValueError("error tool result requires error_type")
+        if self.status is ToolResultStatus.SUCCESS and self.error_type is not None:
+            raise ValueError("successful tool result must not contain error_type")
+
+
+class TerminationReason(StrEnum):
+    """Agent Loop 所有受控终止出口。"""
+
+    FINAL_ANSWER = "final_answer"
+    MAX_ITERATIONS = "max_iterations"
+    LLM_ERROR = "llm_error"
+    CONTEXT_ERROR = "context_error"
+    CANCELLED = "cancelled"
+
+
+@dataclass(frozen=True, slots=True)
+class RunRequest:
+    """发起一次 Agent 运行所需的最小输入。"""
+
+    session_id: str
+    user_input: str
+
+    def __post_init__(self) -> None:
+        if not self.session_id:
+            raise ValueError("session id must not be empty")
+        if not self.user_input:
+            raise ValueError("user input must not be empty")
+
+
+@dataclass(frozen=True, slots=True)
+class RunResult:
+    """一次运行的可审计结果，不使用模糊字符串表示终止状态。"""
+
+    session_id: str
+    trace_id: str
+    termination_reason: TerminationReason
+    iterations: int
+    answer: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.session_id or not self.trace_id:
+            raise ValueError("run result requires session id and trace id")
+        if self.iterations < 0:
+            raise ValueError("iterations must not be negative")
+        if self.termination_reason is TerminationReason.FINAL_ANSWER and not self.answer:
+            raise ValueError("final-answer result requires answer")
+        if self.termination_reason is not TerminationReason.FINAL_ANSWER and self.answer is not None:
+            raise ValueError("non-final result must not contain answer")
