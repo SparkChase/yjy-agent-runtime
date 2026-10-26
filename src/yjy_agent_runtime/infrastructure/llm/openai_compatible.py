@@ -1,4 +1,18 @@
-"""OpenAI Chat Completions 兼容接口的最小 LLM 适配器。"""
+"""OpenAI Chat Completions 兼容接口的最小 LLM 适配器。
+
+这里刻意**不使用**供应商的原生 function calling / tool_calls 字段，而是要求模型
+直接返回一段 JSON：
+
+    {"type": "final_answer", "answer": "..."}
+    {"type": "tool_calls", "tool_calls": [{"name": "...", "arguments": {...}}]}
+
+原因：题目要求“自行实现 LLM 输出解析”。把决策解析放在本地，模型只负责产出
+JSON，Runtime 负责校验、执行和循环，整个控制流才完全掌握在项目自己手里。
+
+适配器只做三件事：发 HTTP、取 choices[0].message.content、把 JSON 解析成
+领域对象。网络错误、HTTP 错误、解析错误分别抛不同异常，交由 AgentLoop 转成
+结构化的 termination_reason。
+"""
 
 import json
 import os
@@ -123,6 +137,8 @@ class OpenAICompatibleLLMClient:
     def decide(self, messages: Sequence[Message]) -> AgentDecision:
         """请求 JSON 决策，并区分网络、服务和响应解析错误。"""
 
+        # response_format 只是“请求模型输出 JSON”的提示；部分兼容网关会忽略它，
+        # 所以下面的解析仍然按“content 里必须能 json.loads”来校验，不假设一定生效。
         payload = {
             "model": self._config.model,
             "messages": self._encode_messages(messages),
@@ -168,6 +184,14 @@ class OpenAICompatibleLLMClient:
 
     @staticmethod
     def _encode_messages(messages: Sequence[Message]) -> list[dict[str, str]]:
+        """把内部消息编码成 Chat Completions 的 role/content 结构。
+
+        关键取舍：内部 TOOL 消息在这里被改写成 USER 消息。因为本适配器没有使用
+        供应商原生的 tool 角色（那需要 assistant.tool_calls 严格配对），而是把
+        “工具结果”当成一段普通上下文交给模型。调用 ID 保留在文本里，模型仍能
+        把结果和某次调用对上。
+        """
+
         encoded = []
         for message in messages:
             if message.role is MessageRole.TOOL:

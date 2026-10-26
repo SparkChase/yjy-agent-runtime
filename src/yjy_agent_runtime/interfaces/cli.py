@@ -3,6 +3,15 @@
 一次 CLI 进程只处理一条用户消息，内部可能循环多轮工具调用，最后输出最终回答。
 入口层只做三件事：解析参数、装配具体实现、打印结果；Agent 的执行逻辑全部在
 `agent.AgentLoop` 里。
+
+会话连续性靠 ``--session-id`` + ``YJY_SESSION_DIR``，不靠进程常驻：
+同一个 ID 的多次 CLI 调用会读写同一个 JSON 快照，不同 ID 互不可见。
+
+退出码约定（脚本和 CI 依赖它）：
+    0  拿到最终回答
+    1  运行了但没拿到答案（llm_error / context_error / tool_error /
+       max_iterations / invalid_decision），stderr 会带最近一次依赖错误
+    2  参数或配置有问题，根本没有发起运行
 """
 
 import argparse

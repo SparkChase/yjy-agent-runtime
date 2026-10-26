@@ -101,7 +101,14 @@ class RegistryToolExecutor:
         *,
         session_aware: bool = False,
     ) -> Any:
-        """在守护线程中执行工具，超时后返回结构化错误。"""
+        """在守护线程中执行工具，超时后返回结构化错误。
+
+        注意语义：``join(timeout)`` 只是“不再等待”，并不会杀死工作线程。
+        超时返回后，工具可能仍在后台继续执行。对 ``calculator``/``search`` 这类
+        无副作用工具没有影响；对 ``todo`` 这类有写入副作用的工具，则存在
+        “已向模型报告超时、稍后却真的写入了”的风险。这是已知边界，修复方案见
+        docs/runtime-remediation-plan.md 的 P1-03。
+        """
 
         outcome: Queue[tuple[bool, Any]] = Queue(maxsize=1)
 

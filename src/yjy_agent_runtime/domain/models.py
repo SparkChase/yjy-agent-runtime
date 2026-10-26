@@ -71,20 +71,25 @@ class TraceEvent:
         )
 
 
-@dataclass(frozen=True, slots=True) # 不可变对象 防止后面修改导致状态混乱
+@dataclass(frozen=True, slots=True)
 class Message:
-    """一条归属于当前 Session 的不可变消息。"""
+    """一条归属于当前 Session 的不可变消息。
+
+    不可变（frozen）是刻意的：Session 快照会在多个 Store 之间传递，如果消息能被
+    原地修改，历史就可能被某一轮循环悄悄改写，Trace 和实际输入会对不上。
+    """
 
     role: MessageRole
     content: str
-    tool_call_id: str | None = None # tool_call_id 只在 TOOL 角色时有意义
+    # tool_call_id 只在 TOOL 角色时有意义，用于把工具结果对回某次调用。
+    tool_call_id: str | None = None
 
     def __post_init__(self) -> None:
-        if not self.content: # conetnt不能为空
+        if not self.content:
             raise ValueError("message content must not be empty")
-        if self.role is MessageRole.TOOL and not self.tool_call_id: # TOOL 消息必须有 tool_call_id
+        if self.role is MessageRole.TOOL and not self.tool_call_id:
             raise ValueError("tool message requires tool_call_id")
-        if self.role is not MessageRole.TOOL and self.tool_call_id is not None: # 其他角色不能有 tool_call_id
+        if self.role is not MessageRole.TOOL and self.tool_call_id is not None:
             raise ValueError("only tool message may contain tool_call_id")
 
 
@@ -191,6 +196,8 @@ class Session:
     def __post_init__(self) -> None:
         if not self.session_id:
             raise ValueError("session id must not be empty")
+        # 摘要的覆盖范围不能超过真实消息数：这是“压缩元数据”和“历史”之间
+        # 最重要的一致性约束，能挡住 covered 被错误推进导致的丢历史。
         if self.summary is not None and self.summary.covered_message_count > len(
             self.messages
         ):

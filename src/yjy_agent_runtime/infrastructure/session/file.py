@@ -129,6 +129,8 @@ class JsonFileSessionStore:
         return session
 
     def _save(self, session: Session) -> None:
+        # 先写同目录临时文件、fsync，再 os.replace 原子替换：
+        # 进程在任何时刻崩溃，磁盘上要么是旧快照，要么是新快照，不会出现半个 JSON。
         payload = self._encode_session(session)
         path = self._path_for(session.session_id)
         with self._lock:
@@ -159,6 +161,9 @@ class JsonFileSessionStore:
                 ) from error
 
     def _path_for(self, session_id: str) -> Path:
+        # 文件名用 sha256，而不是直接拼 session_id：
+        # session_id 来自命令行，可能包含 "/"、".." 等字符，直接拼会越出目录
+        # 或产生非法文件名。哈希后既安全，又能保持“一个 Session 一个文件”。
         digest = hashlib.sha256(session_id.encode("utf-8")).hexdigest()
         return self._directory / f"{digest}.json"
 
