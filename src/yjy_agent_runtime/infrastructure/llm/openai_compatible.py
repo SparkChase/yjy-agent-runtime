@@ -36,12 +36,18 @@ class LLMResponseError(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class OpenAICompatibleConfig:
-    """连接 OpenAI Chat Completions 兼容服务所需配置。"""
+    """连接 OpenAI Chat Completions 兼容服务所需配置。
+
+    `timeout_seconds` 是"等待模型读完并返回"的读取预算，而不是所有阶段共用的
+    总超时。真实网关在多轮工具调用中经常超过 30 秒，因此默认值取 120 秒；
+    连接阶段另有独立的较短预算，避免地址不可达时长时间挂起。
+    """
 
     base_url: str
     model: str
     api_key: str
-    timeout_seconds: float = 30.0
+    timeout_seconds: float = 120.0
+    connect_timeout_seconds: float = 10.0
 
     def __post_init__(self) -> None:
         if not self.base_url.strip():
@@ -52,21 +58,44 @@ class OpenAICompatibleConfig:
             raise LLMConfigurationError("LLM_API_KEY must not be empty")
         if self.timeout_seconds <= 0:
             raise LLMConfigurationError("LLM_TIMEOUT_SECONDS must be positive")
+        if self.connect_timeout_seconds <= 0:
+            raise LLMConfigurationError(
+                "LLM_CONNECT_TIMEOUT_SECONDS must be positive"
+            )
 
     @classmethod
     def from_environment(cls) -> "OpenAICompatibleConfig":
         """从环境变量读取配置，密钥不进入错误或 Trace 文本。"""
 
-        try:
-            timeout = float(os.getenv("LLM_TIMEOUT_SECONDS", "30"))
-        except ValueError as error:
-            raise LLMConfigurationError("LLM_TIMEOUT_SECONDS must be numeric") from error
         return cls(
             base_url=os.getenv("LLM_BASE_URL", ""),
             model=os.getenv("LLM_MODEL", ""),
             api_key=os.getenv("LLM_API_KEY", ""),
-            timeout_seconds=timeout,
+            timeout_seconds=_float_from_env("LLM_TIMEOUT_SECONDS", 120.0),
+            connect_timeout_seconds=_float_from_env(
+                "LLM_CONNECT_TIMEOUT_SECONDS", 10.0
+            ),
         )
+
+    def http_timeout(self) -> httpx.Timeout:
+        """构造分阶段超时：连接要快失败，读取要给模型足够时间。"""
+
+        return httpx.Timeout(
+            self.timeout_seconds,
+            connect=self.connect_timeout_seconds,
+        )
+
+
+def _float_from_env(name: str, default: float) -> float:
+    """读取浮点环境变量，非法值保留明确错误语义。"""
+
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        return float(raw)
+    except ValueError as error:
+        raise LLMConfigurationError(f"{name} must be numeric") from error
 
 
 class OpenAICompatibleLLMClient:
@@ -79,7 +108,9 @@ class OpenAICompatibleLLMClient:
         client: httpx.Client | None = None,
     ) -> None:
         self._config = config
-        self._client = client or httpx.Client(timeout=config.timeout_seconds)
+        # 只有自建客户端才应用分阶段超时；注入的客户端（例如 MockTransport）
+        # 保留调用方自己的超时策略。
+        self._client = client or httpx.Client(timeout=config.http_timeout())
         self._owns_client = client is None
 
     def close(self) -> None:

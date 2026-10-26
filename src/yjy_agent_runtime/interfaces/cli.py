@@ -19,6 +19,8 @@ from yjy_agent_runtime.infrastructure.tools import (
 )
 from yjy_agent_runtime.infrastructure.trace import InMemoryTraceRecorder
 
+from .config import EnvFileError, prepare_environment
+
 
 def build_parser() -> argparse.ArgumentParser:
     """构建可测试的命令行参数解析器。"""
@@ -27,6 +29,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("message", nargs="?", help="用户输入；省略时从 stdin 读取")
     parser.add_argument("--session-id", default="default", help="Session 标识")
     parser.add_argument("--max-iterations", type=int, default=8)
+    parser.add_argument(
+        "--env-file",
+        default=None,
+        help="显式指定配置文件名；省略时自动读取当前目录 .env",
+    )
+    parser.add_argument(
+        "--no-env-file",
+        action="store_true",
+        help="不读取任何 .env 文件，只使用当前进程环境变量",
+    )
     return parser
 
 
@@ -37,6 +49,15 @@ def main(argv: list[str] | None = None) -> int:
     user_input = args.message or sys.stdin.readline().strip()
     if not user_input:
         print("请输入非空消息。", file=sys.stderr)
+        return 2
+
+    try:
+        prepare_environment(
+            env_file=args.env_file,
+            use_env_file=not args.no_env_file,
+        )
+    except EnvFileError as error:
+        print(f"配置失败：{type(error).__name__}: {error}", file=sys.stderr)
         return 2
 
     try:
