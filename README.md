@@ -178,6 +178,7 @@ LLM 输出需要能够解析为两类决策：
 ├── README.md
 ├── pyproject.toml
 ├── uv.lock
+├── scripts/
 ├── src/
 │   └── yjy_agent_runtime/
 │       ├── agent/
@@ -199,11 +200,11 @@ LLM 输出需要能够解析为两类决策：
 
 ## 安装与运行
 
-项目尚未初始化 Python 包。初始化完成后，统一使用 uv：
+统一使用 uv：
 
 ```bash
 uv sync
-uv run yjy-agent
+uv run yjy-agent-runtime
 ```
 
 环境变量预计通过本地 `.env` 或 Shell 注入：
@@ -239,6 +240,20 @@ uv run pytest -m integration
 - 不同 session 的状态隔离
 - 历史压缩后的纯对话追问
 - 历史压缩后的工具追问
+
+## 仓库门禁与持续集成
+
+本地提交前与 CI（GitHub Actions，push 与 pull request 触发）执行同一组检查：
+
+```bash
+uv sync --locked                              # 按 uv.lock 复现环境
+uv run ruff check .                           # 静态检查
+uv run python scripts/verify_md_links.py      # Markdown 本地链接检查
+uv run python scripts/verify_doc_budgets.py   # 常驻文档词数预算
+uv run pytest                                 # 单元测试
+```
+
+词数上限登记在 `scripts/doc-budgets.manifest.json`，处置规则见 `scripts/verify_doc_budgets.py`。
 
 ## 迭代路线
 
@@ -290,7 +305,8 @@ uv run pytest -m integration
 
 - [x] 建立项目开发红线与协作规范
 - [x] 编写初始 README 和系统设计
-- [ ] 使用 uv 初始化 Python 项目
+- [x] 使用 uv 初始化 Python 项目
+- [x] 接入静态检查、文档门禁与持续集成
 - [ ] 实现最小 Agent Loop
 - [ ] 实现工具注册与三个基础工具
 - [ ] 实现 Session 和 Context 管理
