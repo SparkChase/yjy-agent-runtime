@@ -2,6 +2,8 @@
 
 YJY Agent Runtime 是一个从零实现的最小 Agent Runtime 教学项目。核心 Agent Loop、工具调度、Session、Context 压缩、结构化 Trace 和 LLM 响应解析都由本项目自行实现，不依赖现成 Agent 编排框架。
 
+> 想先跑起来、再按顺序读代码：见 [docs/hands-on-guide.md](docs/hands-on-guide.md)。
+
 ## 当前状态
 
 当前版本已经可以运行完整的本地闭环：

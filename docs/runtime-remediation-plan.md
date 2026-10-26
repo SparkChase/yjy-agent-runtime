@@ -91,7 +91,7 @@ interfaces ──► infrastructure ──► agent ──► domain
 - 架构测试通过。
 - 新读者只看 README 能准确找到 LLM、Session、Tool、Trace、Context 的实现位置。
 
-### P1-01 [未修复]：Context 压缩没有真正减少输入
+### P1-01 [已修复]：Context 压缩没有真正减少输入
 
 现象：
 
@@ -116,7 +116,7 @@ interfaces ──► infrastructure ──► agent ──► domain
 - 断言摘要失败后覆盖范围不变，下一次可以重试。
 - 用真实 LLM 做一次“早期事实追问”，回答必须包含预置事实，不能只依赖 Mock。
 
-### P1-02 [未修复]：工具结果缺少模型可用的结构化元数据
+### P1-02 [已修复]：工具结果缺少模型可用的结构化元数据
 
 现象：
 
@@ -316,7 +316,7 @@ interfaces ──► infrastructure ──► agent ──► domain
 | 1 | 架构清理 | 已完成 | `84223dc` |
 | 2 | 配置与 CLI | 已完成 | `ac76cae`、`70f21ba` |
 | 3 | Trace | 已完成 | `d60f849`、`f324ad8`、`aa620fc`、`19e3cfa` |
-| 4 | Context 压缩 | **未开始（下一步）** | 预期 `fix(context): 实现有界压缩与工具结果元数据` |
+| 4 | Context 压缩 | 已完成 | `e57a872` |
 | 5 | 工具执行 | 未开始 | 预期 `fix(tools): 修正超时副作用与计算边界` |
 | 6 | Session 原子写 | 未开始 | 预期 `fix(session): 原子保存工具调用与结果` |
 | 7 | 测试矩阵 | 部分完成（Trace/CLI/配置/架构测试已随各步补齐；真实端到端未做） | 预期 `test: 补齐真实 LLM 与异常路径验收` |
@@ -356,10 +356,10 @@ interfaces ──► infrastructure ──► agent ──► domain
 
 ```text
 uv run --locked ruff check .                 # 通过
-uv run --locked pytest -q                    # 111 passed, 1 deselected
+uv run --locked pytest -q                    # 123 passed, 2 deselected
 uv run --locked python scripts/verify_md_links.py     # 通过
 uv run --locked python scripts/verify_doc_budgets.py  # 通过
-uv run --locked --env-file .env pytest -m integration -q   # 1 passed（真实单次决策）
+uv run --locked --env-file .env pytest -m integration -q   # 2 passed（单次决策 + 压缩后追问）
 ```
 
 ## 6. 验收矩阵
