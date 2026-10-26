@@ -21,6 +21,46 @@ class MessageRole(StrEnum):
     TOOL = "tool"
 
 
+class TraceEventType(StrEnum):
+    """Runtime 可公开记录的结构化事件类型。"""
+
+    RUN_STARTED = "run_started"
+    ITERATION_STARTED = "iteration_started"
+    LLM_STARTED = "llm_started"
+    LLM_COMPLETED = "llm_completed"
+    DECISION_MADE = "decision_made"
+    TOOL_STARTED = "tool_started"
+    TOOL_COMPLETED = "tool_completed"
+    DEPENDENCY_FAILED = "dependency_failed"
+    RUN_TERMINATED = "run_terminated"
+
+
+@dataclass(frozen=True, slots=True)
+class TraceEvent:
+    """一次可关联、可序列化且不包含私有思维链的 Trace 事件。"""
+
+    event_type: TraceEventType
+    session_id: str
+    run_id: str
+    trace_id: str
+    iteration: int
+    timestamp: str
+    attributes: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not self.session_id or not self.run_id or not self.trace_id:
+            raise ValueError("trace event requires session, run and trace ids")
+        if self.iteration < 0:
+            raise ValueError("trace event iteration must not be negative")
+        if not self.timestamp:
+            raise ValueError("trace event timestamp must not be empty")
+        object.__setattr__(
+            self,
+            "attributes",
+            MappingProxyType(dict(self.attributes)),
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class Message:
     """一条归属于当前 Session 的不可变消息。"""
@@ -140,9 +180,8 @@ class Session:
     def __post_init__(self) -> None:
         if not self.session_id:
             raise ValueError("session id must not be empty")
-        if (
-            self.summary is not None
-            and self.summary.covered_message_count > len(self.messages)
+        if self.summary is not None and self.summary.covered_message_count > len(
+            self.messages
         ):
             raise ValueError(
                 "summary cannot cover more messages than the session contains"
@@ -188,7 +227,13 @@ class RunResult:
             raise ValueError("run result requires session id and trace id")
         if self.iterations < 0:
             raise ValueError("iterations must not be negative")
-        if self.termination_reason is TerminationReason.FINAL_ANSWER and not self.answer:
+        if (
+            self.termination_reason is TerminationReason.FINAL_ANSWER
+            and not self.answer
+        ):
             raise ValueError("final-answer result requires answer")
-        if self.termination_reason is not TerminationReason.FINAL_ANSWER and self.answer is not None:
+        if (
+            self.termination_reason is not TerminationReason.FINAL_ANSWER
+            and self.answer is not None
+        ):
             raise ValueError("non-final result must not contain answer")

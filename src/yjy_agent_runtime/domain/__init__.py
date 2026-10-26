@@ -14,6 +14,8 @@ from .models import (
     ToolCallDecision,
     ToolResult,
     ToolResultStatus,
+    TraceEvent,
+    TraceEventType,
 )
 
 __all__ = [
@@ -30,4 +32,6 @@ __all__ = [
     "ToolCallDecision",
     "ToolResult",
     "ToolResultStatus",
+    "TraceEvent",
+    "TraceEventType",
 ]
