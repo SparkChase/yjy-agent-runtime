@@ -95,6 +95,10 @@ def test_iteration_records_prompt_size() -> None:
 
     assert iteration.attributes["message_count"] == 1
     assert iteration.attributes["prompt_chars"] == len("计算 6 * 7")
+    assert iteration.attributes["session_messages_before"] == 1
+    assert iteration.attributes["session_chars_before"] == len("计算 6 * 7")
+    assert iteration.attributes["summary_covered_message_count"] == 0
+    assert iteration.attributes["summary_chars"] == 0
 
 
 def test_tool_events_record_arguments_and_result_summary() -> None:

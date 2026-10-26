@@ -1,4 +1,20 @@
-"""最小线性 Agent Loop。"""
+"""最小线性 Agent Loop。
+
+一次 ``run()`` 的固定顺序（对应 AGENTS.md 第 5 节）：
+
+    读/建 Session -> 追加 USER 消息
+    -> [构建 Context -> LLM 决策 -> 执行工具并写回 -> 判断是否继续]
+    -> 追加 ASSISTANT 消息 -> 返回 RunResult
+
+三个关键约定：
+
+1. 循环只有三种出口：拿到最终回答、依赖报错、达到最大轮次。每种出口都带明确的
+   ``TerminationReason``，不存在“悄悄返回 None”。
+2. 所有 Session 读写都显式带 ``request.session_id``。AgentLoop 自己不保存任何
+   跨请求的对话状态，所以多个窗口/进程之间不会串线。
+3. 依赖错误不向调用方抛出，而是转成 ``RunResult`` + trace 事件；由入口层决定
+   退出码。这样 CLI、HTTP 等入口都能拿到结构化的终止原因。
+"""
 
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -63,6 +79,8 @@ class AgentLoop:
         run_id = str(uuid4())
         trace_id = str(uuid4())
         tool_results: list[ToolResult] = []
+        # 1. 先落盘用户输入，再构建 Context。ContextBuilder 只从 Session 读，
+        #    所以必须先写；否则本轮问题不会出现在模型输入里。
         self._session_store.get_or_create(request.session_id)
         self._session_store.append_message(
             request.session_id,
@@ -77,6 +95,10 @@ class AgentLoop:
         )
 
         for iteration in range(1, self._config.max_iterations + 1):
+            # 2. 每一轮都重新构建 Context：上一轮的工具结果已经写进 Session，
+            #    模型必须看到它，才能决定“继续调工具”还是“给出最终回答”。
+            #    session_before/after 只用于 Trace 观察压缩效果，不参与业务判断。
+            session_before = self._session_store.get(request.session_id)
             try:
                 messages = self._context_provider.build(request, tuple(tool_results))
             except Exception as error:  # noqa: BLE001
@@ -89,6 +111,8 @@ class AgentLoop:
                     stage="context",
                     error=error,
                 )
+            session_after = self._session_store.get(request.session_id)
+            summary = session_after.summary if session_after is not None else None
             self._record_trace(
                 TraceEventType.ITERATION_STARTED,
                 session_id=request.session_id,
@@ -97,6 +121,18 @@ class AgentLoop:
                 iteration=iteration,
                 message_count=len(messages),
                 prompt_chars=self._prompt_chars(messages),
+                session_messages_before=(
+                    len(session_before.messages) if session_before is not None else 0
+                ),
+                session_chars_before=(
+                    self._prompt_chars(session_before.messages)
+                    if session_before is not None
+                    else 0
+                ),
+                summary_covered_message_count=(
+                    summary.covered_message_count if summary is not None else 0
+                ),
+                summary_chars=len(summary.content) if summary is not None else 0,
             )
 
             llm_started = perf_counter()
@@ -139,6 +175,7 @@ class AgentLoop:
                     decision_type="final_answer",
                     decision_summary=decision.decision_summary,
                 )
+                # 3. 最终回答也写入 Session，下一次追问才能看到上一轮结论。
                 self._session_store.append_message(
                     request.session_id,
                     Message(MessageRole.ASSISTANT, decision.answer),
@@ -207,6 +244,13 @@ class AgentLoop:
                         duration_ms=self._duration_ms(tool_started),
                     )
                 tool_results.append(tool_result)
+                # 4. 工具交互写两次，各自服务不同读者：
+                #    - append_tool_interaction：结构化的 call/result，供审计与
+                #      Context 组装“工具信封”；
+                #    - append_message(TOOL)：纯文本结果，供模型对话历史使用。
+                #    两次写之间若进程中断，会留下半条交互。这是当前版本的已知
+                #    边界（见 docs/runtime-remediation-plan.md 的 P2-01），
+                #    不影响单进程内的一次完整运行。
                 self._session_store.append_tool_interaction(
                     request.session_id,
                     call,
@@ -234,6 +278,9 @@ class AgentLoop:
                     result_summary=self._summarize(tool_result.content),
                 )
 
+        # 5. 达到上限时没有答案。这里返回结构化原因而不是抛异常，
+        #    CLI 会把 termination_reason 打印出来，便于区分“模型没收敛”
+        #    和“网络/工具失败”。
         result = RunResult(
             session_id=request.session_id,
             run_id=run_id,
