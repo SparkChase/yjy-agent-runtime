@@ -16,6 +16,7 @@ from yjy_agent_runtime.domain import (
     ToolResult,
     ToolResultStatus,
 )
+from yjy_agent_runtime.infrastructure.session import InMemorySessionStore
 from yjy_agent_runtime.infrastructure.tools import (
     RegistryToolExecutor,
     ToolDefinition,
@@ -133,9 +134,11 @@ def make_loop(
     context = StubContextProvider()
     tools = StubToolExecutor()
     trace = InMemoryTraceRecorder()
+    session_store = InMemorySessionStore()
     loop = AgentLoop(
         context_provider=context,
         llm_client=FakeLLMClient(decisions),
+        session_store=session_store,
         tool_executor=tools,
         trace_recorder=trace,
         config=LoopConfig(max_iterations=max_iterations),
@@ -239,6 +242,7 @@ def test_loop_returns_context_error_and_records_original_error() -> None:
     loop = AgentLoop(
         context_provider=FailingContextProvider(),
         llm_client=FakeLLMClient([]),
+        session_store=InMemorySessionStore(),
         tool_executor=StubToolExecutor(),
         trace_recorder=trace,
     )
@@ -266,6 +270,7 @@ def test_loop_returns_llm_error_and_records_original_error() -> None:
     loop = AgentLoop(
         context_provider=StubContextProvider(),
         llm_client=FailingLLMClient(),
+        session_store=InMemorySessionStore(),
         tool_executor=StubToolExecutor(),
         trace_recorder=trace,
     )
@@ -293,6 +298,7 @@ def test_loop_with_registry_executor_returns_validation_error_to_next_round() ->
                 FinalAnswerDecision(answer="参数类型错误，未执行工具。"),
             ]
         ),
+        session_store=InMemorySessionStore(),
         tool_executor=RegistryToolExecutor(registry),
         trace_recorder=InMemoryTraceRecorder(),
     )
@@ -315,6 +321,7 @@ def test_loop_with_registry_executor_returns_unknown_tool_error_to_next_round() 
                 FinalAnswerDecision(answer="工具不存在。"),
             ]
         ),
+        session_store=InMemorySessionStore(),
         tool_executor=RegistryToolExecutor(ToolRegistry()),
         trace_recorder=InMemoryTraceRecorder(),
     )

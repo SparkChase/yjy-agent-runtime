@@ -123,7 +123,7 @@ infrastructure/
        将 ToolResult 交给下一轮 Context
 ```
 
-循环达到 `max_iterations` 时以 `MAX_ITERATIONS` 终止。工具执行会显式接收 `session_id`。当前已提供独立的进程内 `SessionStore` 保存消息、工具调用、工具结果和摘要元数据；将该存储接入 Agent Loop 与 Context 构建属于后续阶段。
+循环达到 `max_iterations` 时以 `MAX_ITERATIONS` 终止。工具执行会显式接收 `session_id`。Agent Loop 已接入进程内 `SessionStore`，会保存用户消息、助手答复及工具交互；`ContextBuilder` 只读取当前 Session，注入系统约束和工具定义，并按明确的消息条数及工具结果字符预算构建模型输入。
 
 ## 目录结构
 
@@ -139,6 +139,8 @@ infrastructure/
 │   │   ├── loop.py
 │   │   └── ports.py
 │   ├── infrastructure/
+│   │   ├── context/
+│   │   │   └── builder.py
 │   │   ├── session/
 │   │   │   └── memory.py
 │   │   └── tools/
@@ -146,6 +148,7 @@ infrastructure/
 │       └── models.py
 └── tests/
     ├── test_agent_loop.py
+    ├── test_context_builder.py
     ├── test_domain_models.py
     ├── test_session_store.py
     └── test_smoke.py
@@ -185,13 +188,12 @@ uv run python scripts/verify_doc_budgets.py
 uv run pytest
 ```
 
-当前测试覆盖领域模型约束、直接回答、单次及多次工具调用、最大轮次终止、工具执行显式携带 `session_id`，以及 Session 创建、恢复、连续追问、摘要元数据和跨 Session 隔离。真实 LLM 集成测试尚不存在。
+当前测试覆盖领域模型约束、直接回答、单次及多次工具调用、最大轮次终止、工具执行显式携带 `session_id`、Session 创建与隔离，以及 Context 的跨运行连续追问、工具定义注入、历史选择和结果大小预算。真实 LLM 集成测试尚不存在。
 
 ## 后续开发顺序
 
-1. 将 SessionStore 接入 Agent Loop 与 Context 构建。
-2. 实现 Context 预算、工具结果限制和历史压缩。
-3. 实现结构化 Trace 与敏感字段脱敏。
-4. 接入真实 LLM 适配器和 CLI，最后进行端到端验收。
+1. 实现历史摘要、覆盖范围和增量 Context 压缩。
+2. 实现结构化 Trace 与敏感字段脱敏。
+3. 接入真实 LLM 适配器和 CLI，最后进行端到端验收。
 
 更细的任务、分层职责和验收标准见 `docs/development-plan.md`；开发红线和提交规范见 `AGENTS.md`。

@@ -9,6 +9,8 @@ from uuid import uuid4
 
 from yjy_agent_runtime.domain import (
     FinalAnswerDecision,
+    Message,
+    MessageRole,
     RunRequest,
     RunResult,
     TerminationReason,
@@ -16,7 +18,7 @@ from yjy_agent_runtime.domain import (
     ToolResult,
 )
 
-from .ports import ContextProvider, LLMClient, ToolExecutor, TraceRecorder
+from .ports import ContextProvider, LLMClient, SessionStore, ToolExecutor, TraceRecorder
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,12 +40,14 @@ class AgentLoop:
         *,
         context_provider: ContextProvider,
         llm_client: LLMClient,
+        session_store: SessionStore,
         tool_executor: ToolExecutor,
         trace_recorder: TraceRecorder,
         config: LoopConfig | None = None,
     ) -> None:
         self._context_provider = context_provider
         self._llm_client = llm_client
+        self._session_store = session_store
         self._tool_executor = tool_executor
         self._trace_recorder = trace_recorder
         self._config = config or LoopConfig()
@@ -57,6 +61,11 @@ class AgentLoop:
 
         trace_id = str(uuid4())
         tool_results: list[ToolResult] = []
+        self._session_store.get_or_create(request.session_id)
+        self._session_store.append_message(
+            request.session_id,
+            Message(MessageRole.USER, request.user_input),
+        )
         self._trace_recorder.record(
             "run_started",
             session_id=request.session_id,
@@ -99,6 +108,10 @@ class AgentLoop:
                 )
 
             if isinstance(decision, FinalAnswerDecision):
+                self._session_store.append_message(
+                    request.session_id,
+                    Message(MessageRole.ASSISTANT, decision.answer),
+                )
                 result = RunResult(
                     session_id=request.session_id,
                     trace_id=trace_id,
@@ -115,8 +128,20 @@ class AgentLoop:
                 )
 
             for call in decision.tool_calls:
-                tool_results.append(
-                    self._tool_executor.execute(request.session_id, call)
+                tool_result = self._tool_executor.execute(request.session_id, call)
+                tool_results.append(tool_result)
+                self._session_store.append_tool_interaction(
+                    request.session_id,
+                    call,
+                    tool_result,
+                )
+                self._session_store.append_message(
+                    request.session_id,
+                    Message(
+                        MessageRole.TOOL,
+                        tool_result.content,
+                        tool_result.call_id,
+                    ),
                 )
 
         result = RunResult(
