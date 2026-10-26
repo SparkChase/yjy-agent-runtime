@@ -1,6 +1,7 @@
 """基于注册表的工具执行器测试。"""
 
 from collections.abc import Mapping
+from time import sleep
 from typing import Any
 
 import pytest
@@ -51,10 +52,15 @@ def make_executor(
     tool: RecordingTool,
     *,
     max_result_chars: int = 10_000,
+    timeout_seconds: float = 30.0,
 ) -> RegistryToolExecutor:
     registry = ToolRegistry()
     registry.register(tool)
-    return RegistryToolExecutor(registry, max_result_chars=max_result_chars)
+    return RegistryToolExecutor(
+        registry,
+        max_result_chars=max_result_chars,
+        timeout_seconds=timeout_seconds,
+    )
 
 
 def test_executor_validates_arguments_before_invoking_tool() -> None:
@@ -170,3 +176,21 @@ def test_executor_rejects_empty_session_id_and_invalid_limit() -> None:
     executor = RegistryToolExecutor(ToolRegistry())
     with pytest.raises(ValueError, match="session id"):
         executor.execute("", ToolCall("call-1", "missing"))
+
+
+def test_executor_returns_timeout_error_when_tool_exceeds_budget() -> None:
+    class SlowTool(RecordingTool):
+        def invoke(self, arguments: Mapping[str, Any]) -> str:
+            sleep(0.05)
+            return super().invoke(arguments)
+
+    tool = SlowTool()
+    executor = make_executor(tool, timeout_seconds=0.001)
+
+    result = executor.execute(
+        "session-a",
+        ToolCall("call-1", "echo", {"text": "hello"}),
+    )
+
+    assert result.status is ToolResultStatus.ERROR
+    assert result.error_type == "TimeoutError"

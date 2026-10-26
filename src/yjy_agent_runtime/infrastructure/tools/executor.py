@@ -1,5 +1,9 @@
 """基于工具注册表的安全执行器。"""
 
+from queue import Empty, Queue
+from threading import Thread
+from typing import Any
+
 from jsonschema import SchemaError, ValidationError, validate
 
 from yjy_agent_runtime.domain import ToolCall, ToolResult, ToolResultStatus
@@ -15,11 +19,15 @@ class RegistryToolExecutor:
         registry: ToolRegistry,
         *,
         max_result_chars: int = 10_000,
+        timeout_seconds: float = 30.0,
     ) -> None:
         if max_result_chars < 1:
             raise ValueError("max_result_chars must be at least 1")
+        if timeout_seconds <= 0:
+            raise ValueError("timeout_seconds must be positive")
         self._registry = registry
         self._max_result_chars = max_result_chars
+        self._timeout_seconds = timeout_seconds
 
     def execute(self, session_id: str, call: ToolCall) -> ToolResult:
         """在指定 Session 中执行工具，并保留明确的失败类型。"""
@@ -51,7 +59,7 @@ class RegistryToolExecutor:
             )
 
         try:
-            content = tool.invoke(call.arguments)
+            content = self._invoke_with_timeout(tool, call.arguments)
         except Exception as error:  # noqa: BLE001
             return self._error_result(
                 call,
@@ -78,6 +86,34 @@ class RegistryToolExecutor:
             status=ToolResultStatus.SUCCESS,
             content=self._limit_content(content),
         )
+
+    def _invoke_with_timeout(self, tool: object, arguments: object) -> Any:
+        """在守护线程中执行工具，超时后返回结构化错误。"""
+
+        outcome: Queue[tuple[bool, Any]] = Queue(maxsize=1)
+
+        def invoke() -> None:
+            try:
+                result = tool.invoke(arguments)  # type: ignore[attr-defined]
+            except Exception as error:  # noqa: BLE001
+                outcome.put((False, error))
+            else:
+                outcome.put((True, result))
+
+        worker = Thread(target=invoke, daemon=True)
+        worker.start()
+        worker.join(self._timeout_seconds)
+        if worker.is_alive():
+            raise TimeoutError(
+                f"tool execution exceeded {self._timeout_seconds:g} seconds"
+            )
+        try:
+            succeeded, value = outcome.get_nowait()
+        except Empty as error:
+            raise RuntimeError("tool execution returned no result") from error
+        if not succeeded:
+            raise value
+        return value
 
     def _error_result(
         self,
