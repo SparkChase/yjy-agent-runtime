@@ -16,6 +16,11 @@ from yjy_agent_runtime.domain import (
     ToolResult,
     ToolResultStatus,
 )
+from yjy_agent_runtime.infrastructure.tools import (
+    RegistryToolExecutor,
+    ToolDefinition,
+    ToolRegistry,
+)
 
 
 class StubContextProvider:
@@ -93,6 +98,31 @@ class FailingLLMClient:
     def decide(self, messages: Sequence[Message]) -> AgentDecision:
         del messages
         raise TimeoutError("llm timed out")
+
+
+class StrictEchoTool:
+    """用于验证 Agent Loop 与真实注册表执行器集成的最小工具。"""
+
+    def __init__(self) -> None:
+        self.calls: list[object] = []
+        self._definition = ToolDefinition(
+            name="echo",
+            description="原样返回文本",
+            parameters={
+                "type": "object",
+                "properties": {"text": {"type": "string"}},
+                "required": ["text"],
+                "additionalProperties": False,
+            },
+        )
+
+    @property
+    def definition(self) -> ToolDefinition:
+        return self._definition
+
+    def invoke(self, arguments: object) -> str:
+        self.calls.append(arguments)
+        return str(arguments)
 
 
 def make_loop(
@@ -248,3 +278,49 @@ def test_loop_returns_llm_error_and_records_original_error() -> None:
     assert trace.events[-2][1]["error_type"] == "TimeoutError"
     assert trace.events[-2][1]["error_message"] == "llm timed out"
     assert trace.events[-1][1]["reason"] == "llm_error"
+
+
+def test_loop_with_registry_executor_returns_validation_error_to_next_round() -> None:
+    tool = StrictEchoTool()
+    registry = ToolRegistry()
+    registry.register(tool)
+    context = StubContextProvider()
+    loop = AgentLoop(
+        context_provider=context,
+        llm_client=FakeLLMClient(
+            [
+                ToolCallDecision((ToolCall("call-1", "echo", {"text": 42}),)),
+                FinalAnswerDecision(answer="参数类型错误，未执行工具。"),
+            ]
+        ),
+        tool_executor=RegistryToolExecutor(registry),
+        trace_recorder=InMemoryTraceRecorder(),
+    )
+
+    result = loop.run(RunRequest("session-a", "回显数字 42"))
+
+    assert result.answer == "参数类型错误，未执行工具。"
+    assert tool.calls == []
+    assert context.seen_results[1][0].status is ToolResultStatus.ERROR
+    assert context.seen_results[1][0].error_type == "ToolArgumentsValidationError"
+
+
+def test_loop_with_registry_executor_returns_unknown_tool_error_to_next_round() -> None:
+    context = StubContextProvider()
+    loop = AgentLoop(
+        context_provider=context,
+        llm_client=FakeLLMClient(
+            [
+                ToolCallDecision((ToolCall("call-1", "missing"),)),
+                FinalAnswerDecision(answer="工具不存在。"),
+            ]
+        ),
+        tool_executor=RegistryToolExecutor(ToolRegistry()),
+        trace_recorder=InMemoryTraceRecorder(),
+    )
+
+    result = loop.run(RunRequest("session-a", "调用不存在的工具"))
+
+    assert result.answer == "工具不存在。"
+    assert context.seen_results[1][0].status is ToolResultStatus.ERROR
+    assert context.seen_results[1][0].error_type == "UnknownToolError"
