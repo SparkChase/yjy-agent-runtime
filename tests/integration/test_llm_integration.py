@@ -17,7 +17,14 @@ def test_configured_llm_can_return_a_decision() -> None:
     if not all(os.getenv(name) for name in required):
         pytest.skip("real LLM configuration is not available")
 
-    client = OpenAICompatibleLLMClient(OpenAICompatibleConfig.from_environment())
+    config = OpenAICompatibleConfig.from_environment()
+    config = OpenAICompatibleConfig(
+        base_url=config.base_url,
+        model=config.model,
+        api_key=config.api_key,
+        timeout_seconds=max(config.timeout_seconds, 120.0),
+    )
+    client = OpenAICompatibleLLMClient(config)
     try:
         decision = client.decide((Message(MessageRole.USER, "只回复：ok"),))
     finally:

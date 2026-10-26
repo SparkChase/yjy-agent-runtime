@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -143,8 +144,17 @@ class OpenAICompatibleLLMClient:
             raise LLMNetworkError(f"LLM network error: {type(error).__name__}") from error
 
         if response.is_error:
+            detail = response.text[:500].strip()
+            if detail:
+                detail = detail.replace(self._config.api_key, "[REDACTED]")
+                detail = re.sub(
+                    r"(?i)(bearer\s+)[^\s\"']+",
+                    r"\1[REDACTED]",
+                    detail,
+                )
             raise LLMServiceError(
                 f"LLM service returned HTTP {response.status_code}"
+                + (f": {detail}" if detail else "")
             )
         try:
             body = response.json()
@@ -158,16 +168,27 @@ class OpenAICompatibleLLMClient:
 
     @staticmethod
     def _encode_messages(messages: Sequence[Message]) -> list[dict[str, str]]:
-        encoded = [
-            {"role": message.role.value, "content": message.content}
-            for message in messages
-        ]
+        encoded = []
+        for message in messages:
+            if message.role is MessageRole.TOOL:
+                content = f"工具执行结果（调用 {message.tool_call_id}）：{message.content}"
+                encoded.append({"role": MessageRole.USER.value, "content": content})
+            else:
+                encoded.append(
+                    {"role": message.role.value, "content": message.content}
+                )
+        protocol = (
+            "Runtime 决策协议：只返回 JSON 对象。最终回答格式："
+            + '{"type":"final_answer","answer":"...","decision_summary":"公开摘要"}。工具调用格式：'
+            + '{"type":"tool_calls","tool_calls":[{"name":"...","arguments":{...}}],"decision_summary":"公开摘要"}。'
+            + "decision_summary 只能是简短公开摘要，不得输出私有思维链；不得输出 JSON 以外的文本。"
+        )
         if encoded and encoded[0]["role"] == MessageRole.SYSTEM.value:
-            encoded[0]["content"] += (
-                "\n请只返回 JSON 对象。最终回答格式："
-                + '{"type":"final_answer","answer":"...","decision_summary":"公开摘要"}。工具调用格式：'
-                + '{"type":"tool_calls","tool_calls":[{"name":"...","arguments":{...}}],"decision_summary":"公开摘要"}。'
-                + "decision_summary 只能是简短公开摘要，不得输出私有思维链；不得输出 JSON 以外的文本。"
+            encoded[0]["content"] += f"\n{protocol}"
+        else:
+            encoded.insert(
+                0,
+                {"role": MessageRole.SYSTEM.value, "content": protocol},
             )
         return encoded
 
@@ -176,6 +197,9 @@ class OpenAICompatibleLLMClient:
         if not isinstance(data, Mapping):
             raise LLMResponseError("decision must be a JSON object")
         decision_type = data.get("type")
+        if decision_type is None and isinstance(data.get("reply"), str):
+            # 兼容部分 OpenAI-compatible 网关的简单 JSON 回复包装。
+            return FinalAnswerDecision(data["reply"])
         if decision_type == "final_answer":
             answer = data.get("answer")
             if not isinstance(answer, str) or not answer:

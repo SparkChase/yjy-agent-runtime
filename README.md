@@ -33,6 +33,8 @@ YJY Agent Runtime 是一个从零实现的最小 Agent Runtime 教学项目。�
 - 默认测试不访问真实网络；真实供应商联调需要开发者自行提供配置。
 - 适配器使用本项目约定的 JSON 决策协议，不接管供应商原生 Agent 循环。
 
+本次需求验收、真实 API 验证与已复现问题见 [docs/runtime-audit.md](docs/runtime-audit.md)。
+
 ## 目录结构
 
 ```text

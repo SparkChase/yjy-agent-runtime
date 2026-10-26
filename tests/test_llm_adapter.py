@@ -50,6 +50,7 @@ def test_client_decodes_final_answer_and_sends_authentication() -> None:
         payload = json.loads(request.content)
         assert payload["model"] == "test-model"
         assert payload["response_format"] == {"type": "json_object"}
+        assert payload["messages"][0]["role"] == "system"
         return response_for(
             '{"type":"final_answer","answer":"完成",'
             '"decision_summary":"直接回答"}'
@@ -60,6 +61,25 @@ def test_client_decodes_final_answer_and_sends_authentication() -> None:
     decision = client.decide((Message(MessageRole.USER, "你好"),))
 
     assert decision == FinalAnswerDecision("完成", decision_summary="直接回答")
+
+
+def test_client_accepts_reply_envelope_from_compatible_gateway() -> None:
+    client = make_client(lambda request: response_for('{"reply":"ok"}'))
+
+    decision = client.decide((Message(MessageRole.USER, "只回复 ok"),))
+
+    assert decision == FinalAnswerDecision("ok")
+
+
+def test_client_encodes_tool_results_for_custom_json_protocol() -> None:
+    encoded = OpenAICompatibleLLMClient._encode_messages(
+        (Message(MessageRole.TOOL, "42", tool_call_id="call-42"),)
+    )
+
+    assert encoded[0]["role"] == "system"
+    assert encoded[1]["role"] == "user"
+    assert "call-42" in encoded[1]["content"]
+    assert "42" in encoded[1]["content"]
 
 
 def test_client_decodes_tool_calls() -> None:

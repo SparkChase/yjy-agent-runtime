@@ -69,6 +69,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             registry = ToolRegistry()
             register_builtin_tools(registry, store)
+            trace = InMemoryTraceRecorder()
             loop = AgentLoop(
                 context_provider=ContextBuilder(
                     store,
@@ -77,7 +78,7 @@ def main(argv: list[str] | None = None) -> int:
                 llm_client=llm,
                 session_store=store,
                 tool_executor=RegistryToolExecutor(registry),
-                trace_recorder=InMemoryTraceRecorder(),
+                trace_recorder=trace,
                 config=LoopConfig(max_iterations=args.max_iterations),
             )
             result = loop.run(RunRequest(args.session_id, user_input))
@@ -94,4 +95,22 @@ def main(argv: list[str] | None = None) -> int:
         f"运行未返回最终答案，终止原因：{result.termination_reason.value}",
         file=sys.stderr,
     )
+    failure = next(
+        (
+            event
+            for event in reversed(trace.events)
+            if event.event_type.value == "dependency_failed"
+        ),
+        None,
+    )
+    if failure is not None:
+        attributes = failure.attributes
+        print(
+            "依赖错误："
+            f"iteration={failure.iteration} "
+            f"stage={attributes.get('stage')} "
+            f"type={attributes.get('error_type')} "
+            f"message={attributes.get('error_message')}",
+            file=sys.stderr,
+        )
     return 1
