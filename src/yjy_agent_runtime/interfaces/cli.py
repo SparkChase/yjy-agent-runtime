@@ -18,10 +18,12 @@
 import argparse
 import os
 import sys
+from collections.abc import Sequence
 from pathlib import Path
+from time import perf_counter
 
 from yjy_agent_runtime.agent import AgentLoop, LoopConfig
-from yjy_agent_runtime.domain import RunRequest, RunResult
+from yjy_agent_runtime.domain import RunRequest, RunResult, TraceEvent
 from yjy_agent_runtime.infrastructure.context import ContextBuilder
 from yjy_agent_runtime.infrastructure.llm import (
     OpenAICompatibleConfig,
@@ -191,7 +193,9 @@ def main(argv: list[str] | None = None) -> int:
             if not user_input:
                 print("请输入非空消息。", file=sys.stderr)
                 return 2
+            run_started = perf_counter()
             result = loop.run(RunRequest(args.session_id, user_input))
+            elapsed_ms = (perf_counter() - run_started) * 1000
         finally:
             llm.close()
             trace.close()
@@ -201,7 +205,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     _report_trace_path(trace.path)
-    return _report_result(result, trace)
+    return _report_result(result, trace, elapsed_ms)
 
 
 def _run_interactive(
@@ -264,18 +268,25 @@ def _run_interactive(
 
         # 只检查本轮新增的 Trace 事件，避免把上一轮的错误误报给这一轮。
         started = len(trace.memory.events)
+        turn_started = perf_counter()
         try:
             result = loop.run(RunRequest(session_id, text))
         except KeyboardInterrupt:
             # 模型调用可能持续十几秒，允许用户中断本轮而不退出整个对话。
+            elapsed_ms = (perf_counter() - turn_started) * 1000
             print("\n已中断本轮。", file=sys.stderr)
+            _report_timing(trace, elapsed_ms, since=started)
             continue
         except Exception as error:  # noqa: BLE001
+            elapsed_ms = (perf_counter() - turn_started) * 1000
             print(f"本轮失败：{type(error).__name__}: {error}", file=sys.stderr)
+            _report_timing(trace, elapsed_ms, since=started)
             continue
 
+        elapsed_ms = (perf_counter() - turn_started) * 1000
         if result.answer is not None:
             print(f"助手> {result.answer}")
+            _report_timing(trace, elapsed_ms, since=started)
             continue
 
         print(
@@ -293,6 +304,7 @@ def _run_interactive(
                 f"message={attributes.get('error_message')}",
                 file=sys.stderr,
             )
+        _report_timing(trace, elapsed_ms, since=started)
 
     print("已退出。", file=sys.stderr)
     return 0
@@ -305,11 +317,57 @@ def _report_trace_path(path: Path | None) -> None:
         print(f"trace: {path}", file=sys.stderr)
 
 
-def _report_result(result: RunResult, trace: TraceSink) -> int:
+def _format_timing(events: Sequence[TraceEvent], elapsed_ms: float) -> str:
+    """把一次运行的耗时聚合成一行，便于直接在终端判断慢在哪。
+
+    ``llm_completed`` / ``tool_completed`` 事件本身已经带 ``duration_ms``，
+    这里只做求和，不重新计时；``elapsed_ms`` 是调用方用墙钟测的总耗时，
+    因此它 >= 模型 + 工具，差额是 Context 组装、Session 读写等开销。
+    """
+
+    llm_ms = 0.0
+    tool_ms = 0.0
+    llm_calls = 0
+    tool_calls = 0
+    iterations = 0
+    for event in events:
+        event_type = event.event_type.value
+        if event_type == "iteration_started":
+            iterations += 1
+        elif event_type == "llm_completed":
+            llm_ms += _duration_ms(event)
+            llm_calls += 1
+        elif event_type == "tool_completed":
+            tool_ms += _duration_ms(event)
+            tool_calls += 1
+    return (
+        f"耗时：总计 {elapsed_ms / 1000:.1f}s｜"
+        f"模型 {llm_ms / 1000:.1f}s（{llm_calls} 次）｜"
+        f"工具 {tool_ms / 1000:.2f}s（{tool_calls} 次）｜"
+        f"轮次 {iterations}"
+    )
+
+
+def _duration_ms(event: TraceEvent) -> float:
+    value = event.attributes.get("duration_ms", 0)
+    return float(value) if isinstance(value, (int, float)) else 0.0
+
+
+def _report_timing(trace: TraceSink, elapsed_ms: float, since: int = 0) -> None:
+    """只统计 ``since`` 之后的本轮事件，避免交互模式把上一轮算进来。"""
+
+    print(
+        _format_timing(trace.memory.events[since:], elapsed_ms),
+        file=sys.stderr,
+    )
+
+
+def _report_result(result: RunResult, trace: TraceSink, elapsed_ms: float) -> int:
     """按运行结果决定退出码，并在失败时附带最近依赖错误。"""
 
     if result.answer is not None:
         print(result.answer)
+        _report_timing(trace, elapsed_ms)
         return 0
     print(
         f"运行未返回最终答案，终止原因：{result.termination_reason.value}",
@@ -326,4 +384,5 @@ def _report_result(result: RunResult, trace: TraceSink) -> int:
             f"message={attributes.get('error_message')}",
             file=sys.stderr,
         )
+    _report_timing(trace, elapsed_ms)
     return 1

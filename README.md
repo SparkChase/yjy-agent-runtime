@@ -106,7 +106,8 @@ uv run yjy-agent-runtime --interactive --session-id chat
 交互模式支持 `/exit` 退出、`/new <session-id>` 切换会话、`/help` 查看命令。
 
 每次运行都会把脱敏后的运行轨迹写入 JSONL。默认路径为 `logs/<session-id>.jsonl`，
-可用 `--trace-file <path>` 指定，或用 `--no-trace` 关闭。CLI 在 stderr 打印实际路径。
+可用 `--trace-file <path>` 指定，或用 `--no-trace` 关闭。CLI 在 stderr 打印实际路径，
+并在运行结束时打印耗时汇总（总计 / 模型 / 工具 / 轮次）。
 
 ```bash
 uv run yjy-agent-runtime --session-id demo --trace-file logs/demo.jsonl "列出我的待办"

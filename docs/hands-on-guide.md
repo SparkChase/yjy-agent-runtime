@@ -78,6 +78,18 @@ uv run yjy-agent-runtime --session-id hello "你好，请用一句话介绍你�
 
 ## 3. 三个工具逐个跑
 
+三个工具都是模型根据“工具描述 + 参数 Schema”自主选择的，不是硬编码路由。想稳定触发，最直接的办法是**明确说出工具名**：
+
+| 想触发 | 直接这样说 |
+| --- | --- |
+| calculator | `用 calculator 计算 137 * 29` |
+| search | `用 search 搜索 session 隔离` |
+| todo 新增 | `用 todo 记一条待办：明天写周报` |
+| todo 查看 | `列出我的待办` |
+| echo | `用 echo 重复：hello` |
+
+如果只说“算一下”，模型可能直接心算而不调用工具；这不是 bug，是模型的选择。想验证工具链路，就把工具名说清楚。
+
 下面每条命令都可以直接复制。建议每次用不同的 `--session-id`，避免历史互相影响。
 
 ### 3.1 calculator
@@ -229,7 +241,50 @@ run_terminated
 | `summary_covered_message_count` | 摘要已经覆盖多少条旧消息 |
 | `arguments` / `result_summary` | 工具参数与结果摘要（已脱敏、已截断） |
 
-### 4.2 Session 文件
+### 4.2 终端里的耗时汇总
+
+每次运行结束，CLI 会在 stderr 打印一行：
+
+```text
+耗时：总计 39.8s｜模型 39.7s（2 次）｜工具 0.06s（1 次）｜轮次 2
+```
+
+- **总计**：调用方用墙钟测的整轮耗时，包含 Context 组装、Session 读写。
+- **模型**：所有 `llm_completed.duration_ms` 之和，次数就是模型请求数。
+- **工具**：所有 `tool_completed.duration_ms` 之和，次数就是实际执行的工具数。
+- 总计 ≥ 模型 + 工具，差额是本地开销。
+
+交互模式下每轮回答后都会打印一行，方便你判断“是模型慢，还是工具慢”。
+
+JSONL 里本来就有每次调用的 `duration_ms`。想看逐次明细：
+
+```bash
+uv run python - <<'PY'
+import json
+for line in open("logs/t-timing.jsonl", encoding="utf-8"):
+    event = json.loads(line)
+    if event["event_type"] in {"llm_completed", "tool_completed"}:
+        attrs = event["attributes"]
+        print(
+            event["iteration"],
+            event["event_type"],
+            attrs.get("tool_name", ""),
+            f'{attrs.get("duration_ms", 0):.1f}ms',
+        )
+PY
+```
+
+典型输出：
+
+```text
+1 llm_completed  16810.6ms
+1 tool_completed calculator 21.8ms
+2 llm_completed  20512.1ms
+```
+
+这就直接证明了：慢在模型，不在计算。
+
+### 4.3 Session 文件
 
 ```bash
 ls .yjy-sessions

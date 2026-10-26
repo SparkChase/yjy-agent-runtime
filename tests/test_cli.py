@@ -101,6 +101,7 @@ def test_main_writes_trace_file_and_reports_path(
     assert exit_code == 0
     assert captured.out.strip() == "完成"
     assert f"trace: {trace_file}" in captured.err
+    assert "耗时：" in captured.err
     assert trace_file.exists()
 
 
@@ -150,6 +151,39 @@ def test_main_interactive_reuses_session_until_exit(
     ]
     assert captured.out.count("助手> 完成") == 3
     assert "已切换到 session: other" in captured.err
+    assert captured.err.count("耗时：") == 3
+
+
+def test_format_timing_aggregates_llm_and_tool_durations() -> None:
+    from yjy_agent_runtime.domain import TraceEvent, TraceEventType
+
+    def event(
+        event_type: TraceEventType,
+        **attributes: object,
+    ) -> TraceEvent:
+        return TraceEvent(
+            event_type=event_type,
+            session_id="s",
+            run_id="r",
+            trace_id="t",
+            iteration=1,
+            timestamp="2026-10-27T00:00:00+00:00",
+            attributes=attributes,
+        )
+
+    events = (
+        event(TraceEventType.ITERATION_STARTED),
+        event(TraceEventType.LLM_COMPLETED, duration_ms=1500.0),
+        event(TraceEventType.TOOL_COMPLETED, duration_ms=20.0),
+        event(TraceEventType.LLM_COMPLETED, duration_ms=500.0),
+    )
+
+    text = cli._format_timing(events, 2500.0)
+
+    assert "总计 2.5s" in text
+    assert "模型 2.0s（2 次）" in text
+    assert "工具 0.02s（1 次）" in text
+    assert "轮次 1" in text
 
 
 def test_main_reports_missing_message(
