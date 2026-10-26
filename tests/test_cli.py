@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from yjy_agent_runtime import interfaces
+from yjy_agent_runtime.domain import RunResult, TerminationReason
 from yjy_agent_runtime.interfaces import cli
 
 
@@ -21,7 +22,6 @@ class StubLoop:
 
     def run(self, request: object) -> object:
         self.requests.append(request)
-        from yjy_agent_runtime.domain import RunResult, TerminationReason
 
         return RunResult(
             session_id="session-a",
@@ -30,6 +30,27 @@ class StubLoop:
             termination_reason=TerminationReason.FINAL_ANSWER,
             iterations=1,
             answer="完成",
+        )
+
+
+class FailingLoop:
+    """模拟某一轮没拿到最终答案：返回非 final_answer，或直接抛异常。"""
+
+    def __init__(self, *, error: Exception | None = None) -> None:
+        self._error = error
+        self.requests: list[object] = []
+
+    def run(self, request: object) -> object:
+        self.requests.append(request)
+        if self._error is not None:
+            raise self._error
+        return RunResult(
+            session_id="session-a",
+            run_id="run-a",
+            trace_id="trace-a",
+            termination_reason=TerminationReason.LLM_ERROR,
+            iterations=1,
+            answer=None,
         )
 
 
@@ -154,6 +175,104 @@ def test_main_interactive_reuses_session_until_exit(
     assert captured.err.count("耗时：") == 3
 
 
+def test_interactive_returns_failure_when_a_turn_has_no_answer(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """某轮以 llm_error 结束时，交互模式不能返回 0 让脚本误判成功。"""
+
+    loop = FailingLoop()
+    monkeypatch.setattr(cli, "build_loop", lambda **_kwargs: loop)
+    inputs = iter(["hi", "/exit"])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(inputs))
+
+    exit_code = cli.main(["--interactive", "--no-trace", "--session-id", "chat"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "终止原因：llm_error" in captured.err
+    assert len(loop.requests) == 1
+
+
+def test_interactive_returns_failure_when_a_turn_raises(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """本轮抛异常时只中断这一轮，但整体退出码必须是失败。"""
+
+    loop = FailingLoop(error=RuntimeError("boom"))
+    monkeypatch.setattr(cli, "build_loop", lambda **_kwargs: loop)
+    inputs = iter(["hi", "/exit"])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(inputs))
+
+    exit_code = cli.main(["--interactive", "--no-trace", "--session-id", "chat"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "本轮失败：RuntimeError: boom" in captured.err
+
+
+def test_interactive_failure_is_not_cleared_by_a_later_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """先失败后成功仍然算失败：CI 不能因为最后一句答上了就报成功。"""
+
+    class FlakyLoop:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def run(self, request: object) -> object:
+            self.calls += 1
+            if self.calls == 1:
+                return RunResult(
+                    session_id="session-a",
+                    run_id="run-a",
+                    trace_id="trace-a",
+                    termination_reason=TerminationReason.LLM_ERROR,
+                    iterations=1,
+                    answer=None,
+                )
+            return RunResult(
+                session_id="session-a",
+                run_id="run-b",
+                trace_id="trace-b",
+                termination_reason=TerminationReason.FINAL_ANSWER,
+                iterations=1,
+                answer="完成",
+            )
+
+    monkeypatch.setattr(cli, "build_loop", lambda **_kwargs: FlakyLoop())
+    inputs = iter(["第一句", "第二句", "/exit"])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(inputs))
+
+    exit_code = cli.main(["--interactive", "--no-trace", "--session-id", "chat"])
+
+    assert exit_code == 1
+
+
+def test_main_rejects_non_positive_max_iterations(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """--max-iterations 0 属于参数问题：没发起运行，返回 2 而不是 1。"""
+
+    def explode(**_kwargs: object) -> object:
+        raise AssertionError("参数非法时不应装配 Loop")
+
+    monkeypatch.setattr(cli, "build_loop", explode)
+    trace_file = tmp_path / "trace.jsonl"
+
+    exit_code = cli.main(
+        ["--max-iterations", "0", "--trace-file", str(trace_file), "你好"]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert "--max-iterations" in captured.err
+    assert not trace_file.exists()
+
+
 def test_format_timing_aggregates_llm_and_tool_durations() -> None:
     from yjy_agent_runtime.domain import TraceEvent, TraceEventType
 
@@ -234,13 +353,15 @@ def test_main_fails_fast_without_configuration(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    """配置缺失属于“没有发起运行”，按退出码约定返回 2。"""
+
     monkeypatch.delenv("LLM_API_KEY", raising=False)
     monkeypatch.setenv("YJY_SESSION_DIR", str(tmp_path / "sessions"))
 
     exit_code = cli.main(["--no-trace", "--no-env-file", "你好"])
 
     captured = capsys.readouterr()
-    assert exit_code == 1
+    assert exit_code == 2
     assert "LLM_API_KEY" in captured.err
 
 
@@ -258,7 +379,7 @@ def test_main_never_calls_network_when_config_missing(
 
     exit_code = cli.main(["--no-trace", "--no-env-file", "你好"])
 
-    assert exit_code == 1
+    assert exit_code == 2
     assert "LLM_BASE_URL" in capsys.readouterr().err
 
 

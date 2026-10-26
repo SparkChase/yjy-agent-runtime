@@ -13,6 +13,9 @@
     1  运行了但没拿到答案（llm_error / context_error / tool_error /
        max_iterations / invalid_decision），stderr 会带最近一次依赖错误
     2  参数或配置有问题，根本没有发起运行
+
+``--interactive`` 沿用同一套约定：只要有一轮没拿到最终答案就返回 1，
+不因为“进程最后是正常退出的”而报成功。
 """
 
 import argparse
@@ -26,6 +29,7 @@ from yjy_agent_runtime.agent import AgentLoop, LoopConfig
 from yjy_agent_runtime.domain import RunRequest, RunResult, TraceEvent
 from yjy_agent_runtime.infrastructure.context import ContextBuilder
 from yjy_agent_runtime.infrastructure.llm import (
+    LLMConfigurationError,
     OpenAICompatibleConfig,
     OpenAICompatibleLLMClient,
 )
@@ -175,6 +179,13 @@ def main(argv: list[str] | None = None) -> int:
 
     args = build_parser().parse_args(argv)
 
+    # 参数校验必须在装配任何依赖之前完成：这类问题没有发起运行，退出码是 2。
+    # 放在这里而不是交给 LoopConfig，是因为 LoopConfig 在 build_loop 里构造，
+    # 那里抛出的 ValueError 会被下面的运行失败分支吞成 1。
+    if args.max_iterations < 1:
+        print("--max-iterations 必须是大于等于 1 的整数。", file=sys.stderr)
+        return 2
+
     # 一次性模式在装配任何依赖之前就校验输入，坏字符不会走到模型或 Session。
     # 交互模式不在这里读 stdin，交给 _run_interactive 逐轮处理。
     user_input: str | None = None
@@ -187,18 +198,22 @@ def main(argv: list[str] | None = None) -> int:
             print(SURROGATE_INPUT_MESSAGE, file=sys.stderr)
             return 2
 
+    # 配置阶段：只加载 .env 和读取 LLM 配置，不触碰网络与 Session。
+    # 这里任何失败都意味着“没有发起运行”，按退出码约定返回 2；
+    # 只捕获配置类异常（含 .env 读写与解码失败），其余异常照常抛出，
+    # 避免把代码缺陷伪装成配置问题。
     try:
         prepare_environment(
             env_file=args.env_file,
             use_env_file=not args.no_env_file,
         )
-    except EnvFileError as error:
+        config = OpenAICompatibleConfig.from_environment()
+    except (EnvFileError, LLMConfigurationError, OSError, UnicodeDecodeError) as error:
         print(f"配置失败：{type(error).__name__}: {error}", file=sys.stderr)
         return 2
 
     trace = TraceSink(resolve_trace_path(args))
     try:
-        config = OpenAICompatibleConfig.from_environment()
         llm = OpenAICompatibleLLMClient(config)
         try:
             loop = build_loop(
@@ -246,6 +261,10 @@ def _run_interactive(
 
     这里不做流式输出，也不改变模型调用次数：每条消息仍然要等模型返回。
     交互模式解决的是“反复启动进程、反复输入 session id”的麻烦，不是延迟。
+
+    退出码与一次性模式保持一致：只要有一轮没拿到最终答案（异常或非
+    final_answer 终止），整个进程就返回 1。否则脚本化调用交互模式时，
+    一次 llm_error 会被误判成成功。用户自己 Ctrl-C 中断的那一轮不算失败。
     """
 
     print(
@@ -255,6 +274,7 @@ def _run_interactive(
     )
     _report_trace_path(trace.path)
 
+    failed = False
     pending: list[str] = []
     if initial:
         if _contains_surrogate(initial):
@@ -310,6 +330,7 @@ def _run_interactive(
             continue
         except Exception as error:  # noqa: BLE001
             elapsed_ms = (perf_counter() - turn_started) * 1000
+            failed = True
             print(f"本轮失败：{type(error).__name__}: {error}", file=sys.stderr)
             _report_timing(trace, elapsed_ms, since=started)
             continue
@@ -320,6 +341,7 @@ def _run_interactive(
             _report_timing(trace, elapsed_ms, since=started)
             continue
 
+        failed = True
         print(
             f"运行未返回最终答案，终止原因：{result.termination_reason.value}",
             file=sys.stderr,
@@ -338,7 +360,7 @@ def _run_interactive(
         _report_timing(trace, elapsed_ms, since=started)
 
     print("已退出。", file=sys.stderr)
-    return 0
+    return 1 if failed else 0
 
 
 def _report_trace_path(path: Path | None) -> None:

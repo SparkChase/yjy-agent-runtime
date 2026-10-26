@@ -105,6 +105,10 @@ uv run yjy-agent-runtime --interactive --session-id chat
 
 交互模式支持 `/exit` 退出、`/new <session-id>` 切换会话、`/help` 查看命令。
 
+退出码约定：`0` 拿到最终回答；`1` 运行了但没拿到答案（`llm_error`、工具异常、
+达到轮次上限等）；`2` 参数或配置有问题，根本没有发起运行。交互模式沿用同一套
+约定：只要有一轮没拿到最终答案，进程最终退出码就是 `1`。
+
 每次运行都会把脱敏后的运行轨迹写入 JSONL。默认路径为 `logs/<session-id>.jsonl`，
 可用 `--trace-file <path>` 指定，或用 `--no-trace` 关闭。CLI 在 stderr 打印实际路径，
 并在运行结束时打印耗时汇总（总计 / 模型 / 工具 / 轮次）。
