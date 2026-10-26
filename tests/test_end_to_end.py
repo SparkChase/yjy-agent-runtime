@@ -86,7 +86,7 @@ def test_openai_compatible_tool_loop_runs_to_final_answer() -> None:
     )
     store = InMemorySessionStore()
     registry = ToolRegistry()
-    register_builtin_tools(registry)
+    register_builtin_tools(registry, store)
     trace = InMemoryTraceRecorder()
     loop = AgentLoop(
         context_provider=ContextBuilder(

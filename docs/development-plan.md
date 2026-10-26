@@ -410,21 +410,36 @@
 
 #### 任务 F：最终验收
 
-- [ ] 运行 `uv run ruff check .`。
-- [ ] 运行 `uv run pytest -q`。
-- [ ] 运行 Markdown 链接和文档预算检查。
-- [ ] 在有真实 LLM 配置时运行 `uv run pytest -m integration -q`；无配置时记录为外部阻塞，不伪造通过。
-- [ ] 检查 `git status --short`、提交边界和敏感信息。
-- [ ] 更新本节最终状态，明确“已交付”和“仍需用户提供的外部条件”。
+- [x] 运行 `uv run ruff check .`。
+- [x] 运行 `uv run pytest -q`。
+- [x] 运行 Markdown 链接和文档预算检查。
+- [x] 执行 `uv run pytest -m integration -q`；因缺少真实配置按预期跳过，并记录外部阻塞。
+- [x] 检查 `git status --short`、提交边界和敏感信息。
+- [x] 更新本节最终状态，明确“已交付”和“仍需用户提供的外部条件”。
 
 ### 8.3 执行记录
 
 | 日期 | 任务 | 状态 | 证据/提交 |
 | --- | --- | --- | --- |
 | 2026-10-26 | 初始审计与任务拆分 | 已完成 | 本节 8.1；确认工具、持久化 Session、Prompt 记录和真实联调仍有缺口 |
-| 2026-10-26 | 任务 A：三工具 | 已完成 | `6f22b68`；`74 passed, 1 skipped` |
+| 2026-10-26 | 任务 A：三工具 | 已完成 | `6f22b68`；工具单测和注册 Schema 验证 |
 | 2026-10-26 | 任务 B：跨运行 Session | 已完成 | `715c354`；JSON 恢复、窗口隔离、损坏快照测试 |
 | 2026-10-26 | 任务 C：公开决策摘要 | 已完成 | `d3b47f3`；摘要进入 Trace，不进入 Session |
 | 2026-10-26 | 任务 D：测试矩阵 | 已完成 | `2b46572`；三工具 AgentLoop 和恢复验收场景 |
-| 2026-10-26 | 任务 E：文档记录 | 已完成 | `2b46572`、当前 README；Prompt/问题记录已建立 |
-| 2026-10-26 | 任务 F：最终验收 | 进行中 | 默认测试和静态检查待最后执行；真实 integration 仍依赖用户配置 |
+| 2026-10-26 | 任务 E：文档记录 | 已完成 | `67a7e64`；README、Prompt/问题记录和执行表同步 |
+| 2026-10-26 | 任务 F：最终验收 | 已完成（真实 API 外部待验） | 最终结果：`75 passed, 1 skipped`；Ruff、Markdown 链接、文档预算均通过；integration 命令运行但因缺少凭据跳过 |
+
+### 8.4 最终交付状态
+
+本地代码交付已完成：题目要求的三个工具、Schema 注册、从零实现的 Agent Loop、Session 隔离与跨 CLI 运行恢复、Context 追问和基础压缩、异常处理、结构化 Trace、Mock 完整闭环、README 和 AI Prompt/问题解决记录均已实现并通过默认验收。
+
+验证证据：
+
+- `uv run pytest -q`：`75 passed, 1 skipped`。
+- `uv run ruff check .`：通过。
+- `uv run python scripts/verify_md_links.py`：6 个 Markdown 文件本地链接有效。
+- `uv run python scripts/verify_doc_budgets.py`：2 份受预算管理文档通过。
+- `uv run pytest -m integration -q`：1 个真实 LLM 测试因缺少 `LLM_BASE_URL`、`LLM_MODEL`、`LLM_API_KEY` 而跳过；没有真实供应商响应证据。
+- GitHub remote、推送和代码链接由用户负责，本任务没有配置或修改 GitHub。
+
+唯一剩余外部验收：配置真实 OpenAI-compatible 服务环境变量后，再运行 `uv run pytest -m integration -q` 并使用 README 示例完成一次真实 CLI 工具调用。这一步需要用户提供/配置有效服务凭据；在此之前，本仓库不能声称已完成真实 LLM 联调。

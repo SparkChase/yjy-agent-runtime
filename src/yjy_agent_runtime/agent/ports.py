@@ -91,6 +91,14 @@ class SessionStore(Protocol):
         """设置或清除 Session 摘要元数据。"""
         ...
 
+    def append_todo(self, session_id: str, todo: str) -> Session:
+        """向当前 Session 追加待办。"""
+        ...
+
+    def list_todos(self, session_id: str) -> tuple[str, ...]:
+        """读取当前 Session 的待办快照。"""
+        ...
+
 
 class TraceRecorder(Protocol):
     """记录公开、结构化且可关联的运行事件。"""

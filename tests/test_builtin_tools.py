@@ -1,5 +1,7 @@
 """最小内置工具测试。"""
 
+import pytest
+
 from yjy_agent_runtime.domain import ToolCall, ToolResultStatus
 from yjy_agent_runtime.infrastructure.session import InMemorySessionStore
 from yjy_agent_runtime.infrastructure.tools import (
@@ -19,8 +21,10 @@ def test_echo_tool_definition_has_no_side_effects() -> None:
 
 
 def test_echo_tool_runs_through_registry_executor() -> None:
+    store = InMemorySessionStore()
+    store.get_or_create("session-a")
     registry = ToolRegistry()
-    register_builtin_tools(registry)
+    register_builtin_tools(registry, store)
     executor = RegistryToolExecutor(registry)
 
     result = executor.execute(
@@ -33,8 +37,9 @@ def test_echo_tool_runs_through_registry_executor() -> None:
 
 
 def test_echo_tool_rejects_empty_text_before_invocation() -> None:
+    store = InMemorySessionStore()
     registry = ToolRegistry()
-    register_builtin_tools(registry)
+    register_builtin_tools(registry, store)
     executor = RegistryToolExecutor(registry)
 
     result = executor.execute(
@@ -47,8 +52,9 @@ def test_echo_tool_rejects_empty_text_before_invocation() -> None:
 
 
 def test_register_builtin_tools_exposes_required_tool_schemas() -> None:
+    store = InMemorySessionStore()
     registry = ToolRegistry()
-    register_builtin_tools(registry)
+    register_builtin_tools(registry, store)
 
     assert [definition.name for definition in registry.definitions()] == [
         "echo",
@@ -59,8 +65,9 @@ def test_register_builtin_tools_exposes_required_tool_schemas() -> None:
 
 
 def test_calculator_rejects_code_execution_and_calculates_safely() -> None:
+    store = InMemorySessionStore()
     registry = ToolRegistry()
-    register_builtin_tools(registry)
+    register_builtin_tools(registry, store)
     executor = RegistryToolExecutor(registry)
 
     success = executor.execute(
@@ -78,9 +85,17 @@ def test_calculator_rejects_code_execution_and_calculates_safely() -> None:
     assert failure.error_type == "ValueError"
 
 
-def test_mock_search_is_deterministic_and_has_no_network_dependency() -> None:
+def test_register_builtin_tools_requires_explicit_session_store() -> None:
     registry = ToolRegistry()
-    register_builtin_tools(registry)
+
+    with pytest.raises(TypeError):
+        register_builtin_tools(registry)  # type: ignore[call-arg]
+
+
+def test_mock_search_is_deterministic_and_has_no_network_dependency() -> None:
+    store = InMemorySessionStore()
+    registry = ToolRegistry()
+    register_builtin_tools(registry, store)
     executor = RegistryToolExecutor(registry)
 
     result = executor.execute(

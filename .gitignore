@@ -31,3 +31,4 @@ dist/
 # Runtime output
 logs/
 *.log
+.yjy-sessions/

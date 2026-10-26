@@ -4,7 +4,7 @@ import argparse
 import os
 import sys
 
-from yjy_agent_runtime.agent import AgentLoop
+from yjy_agent_runtime.agent import AgentLoop, LoopConfig
 from yjy_agent_runtime.domain import RunRequest
 from yjy_agent_runtime.infrastructure.context import ContextBuilder
 from yjy_agent_runtime.infrastructure.llm import (
@@ -57,6 +57,7 @@ def main(argv: list[str] | None = None) -> int:
                 session_store=store,
                 tool_executor=RegistryToolExecutor(registry),
                 trace_recorder=InMemoryTraceRecorder(),
+                config=LoopConfig(max_iterations=args.max_iterations),
             )
             result = loop.run(RunRequest(args.session_id, user_input))
         finally:

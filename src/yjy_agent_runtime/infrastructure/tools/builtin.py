@@ -169,14 +169,10 @@ class TodoTool:
         )
 
 
-def register_builtin_tools(registry: ToolRegistry, session_store: Any | None = None) -> None:
+def register_builtin_tools(registry: ToolRegistry, session_store: Any) -> None:
     """注册题目要求的三个工具及无副作用的 echo 工具。"""
 
     registry.register(EchoTool())
     registry.register(CalculatorTool())
     registry.register(MockSearchTool())
-    if session_store is None:
-        from yjy_agent_runtime.infrastructure.session import InMemorySessionStore
-
-        session_store = InMemorySessionStore()
     registry.register(TodoTool(session_store))

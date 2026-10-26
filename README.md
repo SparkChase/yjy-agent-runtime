@@ -87,6 +87,8 @@ export LLM_API_KEY="your-api-key"
 YJY_SESSION_DIR=.yjy-sessions uv run yjy-agent-runtime --session-id demo "请计算 6 * 7，并把结果记入 todo"
 ```
 
+单次运行的轮次上限可通过 `--max-iterations` 设置，默认值为 8。
+
 也可以省略消息参数，让 CLI 从 stdin 读取：
 
 ```bash
