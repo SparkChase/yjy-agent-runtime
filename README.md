@@ -1,199 +1,130 @@
 # YJY Agent Runtime
 
-YJY Agent Runtime 是一个从零实现的最小可用 Agent Runtime 教学项目。项目不借助现成 Agent 框架接管核心流程，而是自行实现领域模型、Agent Loop、工具调用、Session、Context 和 Trace。
+YJY Agent Runtime 是一个从零实现的最小 Agent Runtime 教学项目。核心 Agent Loop、工具调度、Session、Context 压缩、结构化 Trace 和 LLM 响应解析都由本项目自行实现，不依赖现成 Agent 编排框架。
 
-> 本文档以当前 `main` 分支代码为准。尚未实现的能力统一标记为“规划中”，不作为当前可用能力宣传。
+## 当前状态
 
-## 当前实现状态
-
-当前版本已经具备：
-
-- 不依赖模型厂商或存储实现的领域对象。
-- 显式、线性的 Agent Loop。
-- 最终回答和一个或多个工具调用两类结构化决策。
-- 最大循环轮次与明确的终止原因。
-- Context、LLM、工具执行和 Trace 的应用端口。
-- 使用 Fake 与 Stub 的确定性单元测试，不需要 API Key 或网络。
-- LLM 环境变量示例，但尚未接入真实 LLM 适配器。
-
-当前版本尚未具备：
-
-- 工具注册表、工具 Schema 校验和内置工具实现。
-- Session 存储、恢复与跨运行连续追问。
-- Context 预算、历史压缩和 Memory。
-- 可用于生产的 Trace 实现。
-- 真实 LLM 适配器和可交互 CLI。
-
-因此，当前 `uv run yjy-agent-runtime` 仍只是项目入口占位，不代表完整 Runtime 已可运行。
-
-## 分层架构
-
-项目采用领域层、应用层和基础设施层的边界：
+当前版本已经可以运行完整的本地闭环：
 
 ```text
-外部入口
-   │
-   ▼
-基础设施层
-真实 LLM、工具、存储、Context、Trace、CLI 的具体实现
-   │ 实现应用端口
-   ▼
-应用层
-Agent Loop 与用例编排
-   │ 使用领域对象
-   ▼
-领域层
-稳定概念、状态、不变量和终止语义
+用户输入
+  -> ContextBuilder
+  -> OpenAI-compatible LLMClient
+  -> FinalAnswer 或 ToolCall
+  -> ToolRegistry / RegistryToolExecutor
+  -> SessionStore 和下一轮 Context
+  -> 最终回答
 ```
 
-依赖方向必须保持为：
+已具备的能力：
 
-```text
-基础设施层 ──► 应用层 ──► 领域层
-```
+- 领域模型和构造期约束：消息、工具调用、工具结果、Session、决策和终止原因。
+- 显式线性 Agent Loop：直接回答、多工具调用、最大轮次、Context/LLM/工具错误和非法决策终止。
+- 工具系统：注册表、唯一名称、JSON Schema 参数校验、未知工具、异常结果、结果大小限制和内置 `echo` 工具。
+- 进程内 Session：消息、工具交互和摘要元数据按 `session_id` 隔离。
+- Context：系统约束、工具定义、最近历史、工具结果预算和增量历史摘要。
+- Trace：`session_id`、`run_id`、`trace_id`、轮次、LLM/工具耗时、终止原因和递归敏感字段脱敏。
+- OpenAI Chat Completions 兼容适配器：从环境变量读取配置，区分网络、服务和响应解析错误。
+- CLI 入口：`yjy-agent-runtime`。
 
-领域层不依赖应用层或基础设施层；应用层不直接依赖具体模型 SDK、数据库或命令行实现。
+当前仍有边界：
 
-### 领域层
-
-位置：`src/yjy_agent_runtime/domain/`
-
-领域层当前包含：
-
-- `MessageRole`、`Message`
-- `ToolCall`、`ToolResult`、`ToolResultStatus`
-- `FinalAnswerDecision`、`ToolCallDecision`、`AgentDecision`
-- `RunRequest`、`RunResult`
-- `TerminationReason`
-
-这些对象负责表达 Runtime 的稳定事实，并在构造阶段拒绝空消息、非法工具结果、重复调用 ID 等无效状态。领域层不调用 LLM、不执行工具，也不访问存储。
-
-### 应用层
-
-位置：`src/yjy_agent_runtime/agent/`
-
-应用层当前包含：
-
-- `AgentLoop`：编排 Context、LLM 决策、工具执行和终止。
-- `LoopConfig`：定义最大循环轮次。
-- `ContextProvider`、`LLMClient`、`ToolExecutor`、`TraceRecorder`：声明循环所需的抽象端口。
-
-应用层只说明一次 Agent 运行如何推进，以及需要哪些外部能力，不决定这些能力如何实现。
-
-### 基础设施层
-
-基础设施层负责实现应用端口，包括真实 LLM 客户端、工具注册表、SessionStore、ContextBuilder、TraceRecorder 和 CLI。
-
-当前仓库尚未提交正式的基础设施实现。测试中的 Fake、Stub 和内存记录器只用于验证应用层行为，不属于可交付的运行时基础设施。
-
-后续代码应集中放入 `src/yjy_agent_runtime/infrastructure/`，并按照能力继续细分，例如：
-
-```text
-infrastructure/
-├── llm/
-├── tools/
-├── session/
-├── context/
-└── trace/
-```
-
-入口适配代码放入 `src/yjy_agent_runtime/interfaces/`，例如 CLI。只有实际实现出现时才创建对应目录，避免用空目录表示进度。
-
-## 当前 Agent Loop
-
-当前循环真实执行以下步骤：
-
-```text
-接收 RunRequest
-      │
-      ▼
-由 ContextProvider 构建消息
-      │
-      ▼
-由 LLMClient 返回结构化决策
-      │
-      ├── FinalAnswerDecision ──► 返回 RunResult
-      │
-      └── ToolCallDecision
-              │
-              ▼
-       ToolExecutor 逐个执行工具
-              │
-              ▼
-       将 ToolResult 交给下一轮 Context
-```
-
-循环达到 `max_iterations` 时以 `MAX_ITERATIONS` 终止。工具执行会显式接收 `session_id`。Agent Loop 已接入进程内 `SessionStore`，会保存用户消息、助手答复及工具交互；`ContextBuilder` 只读取当前 Session，注入系统约束和工具定义，并按明确的消息条数及工具结果字符预算构建模型输入。
+- Session 只保存在进程内，重启后不会恢复。
+- 默认测试不访问真实网络；真实供应商联调需要开发者自行提供配置。
+- 适配器使用本项目约定的 JSON 决策协议，不接管供应商原生 Agent 循环。
 
 ## 目录结构
 
 ```text
-.
-├── AGENTS.md
-├── README.md
-├── docs/
-│   └── development-plan.md
-├── src/yjy_agent_runtime/
-│   ├── __init__.py
-│   ├── agent/
-│   │   ├── loop.py
-│   │   └── ports.py
-│   ├── infrastructure/
-│   │   ├── context/
-│   │   │   └── builder.py
-│   │   ├── session/
-│   │   │   └── memory.py
-│   │   └── tools/
-│   └── domain/
-│       └── models.py
-└── tests/
-    ├── test_agent_loop.py
-    ├── test_context_builder.py
-    ├── test_domain_models.py
-    ├── test_session_store.py
-    └── test_smoke.py
+src/yjy_agent_runtime/
+├── domain/                 # 稳定领域对象和不变量
+├── agent/                  # AgentLoop 和应用端口
+├── infrastructure/
+│   ├── context/            # Context、历史选择和压缩
+│   ├── llm/                # OpenAI-compatible HTTP 适配器
+│   ├── session/            # 进程内 SessionStore
+│   ├── tools/              # 工具注册、校验和执行
+│   └── trace/              # 结构化事件和脱敏 Recorder
+└── interfaces/             # CLI 入口
 ```
 
-`docs/development-plan.md` 描述目标架构和后续阶段；本 README 描述当前代码已经具备的真实能力。
+依赖方向保持为：
 
-## 环境与配置
+```text
+基础设施层 -> 应用层 -> 领域层
+```
 
-- Python 3.12 或更高版本
-- uv
+领域层不依赖具体模型 SDK、数据库或命令行实现。
 
-安装依赖：
+## 安装
+
+环境要求：Python 3.12+ 和 uv。
 
 ```bash
 uv sync --locked
 ```
 
-真实 LLM 尚未接入，但配置占位已记录在 `.env.example`：
+## 配置与运行
+
+适配器读取以下环境变量：
 
 ```dotenv
 LLM_BASE_URL=https://your-llm-provider.example/v1
 LLM_MODEL=your-model-name
 LLM_API_KEY=your-api-key
+LLM_TIMEOUT_SECONDS=30
 ```
 
-`.env` 已被 Git 忽略，真实密钥不得写入代码、日志、测试或 Git 历史。
+真实密钥只能通过本地环境变量或未跟踪配置注入，不能写入代码、日志、测试快照或 Git 历史。
+
+运行一次对话：
+
+```bash
+export LLM_BASE_URL="https://your-llm-provider.example/v1"
+export LLM_MODEL="your-model-name"
+export LLM_API_KEY="your-api-key"
+uv run yjy-agent-runtime --session-id demo "请调用 echo 工具回显 hello，然后总结结果"
+```
+
+也可以省略消息参数，让 CLI 从 stdin 读取：
+
+```bash
+printf '%s\n' "你好" | uv run yjy-agent-runtime
+```
+
+LLM 返回的内容必须是以下两种 JSON 之一：
+
+```json
+{"type":"final_answer","answer":"..."}
+```
+
+```json
+{"type":"tool_calls","tool_calls":[{"name":"echo","arguments":{"text":"hello"}}]}
+```
+
+工具调用后 Runtime 会把结构化工具结果保存到当前 Session，并继续下一轮，直到得到最终回答或达到最大轮次。
 
 ## 验证
 
-当前代码可执行以下检查：
+默认检查不需要 API Key 或网络：
 
 ```bash
 uv run ruff check .
 uv run python scripts/verify_md_links.py
 uv run python scripts/verify_doc_budgets.py
-uv run pytest
+uv run pytest -q
 ```
 
-当前测试覆盖领域模型约束、直接回答、单次及多次工具调用、最大轮次终止、工具执行显式携带 `session_id`、Session 创建与隔离，以及 Context 的跨运行连续追问、工具定义注入、历史选择和结果大小预算。真实 LLM 集成测试尚不存在。
+当前默认测试包含领域约束、Agent Loop 正常和异常路径、工具 Schema、未知工具、Session 隔离、Context 预算和增量压缩、Trace 脱敏、LLM 适配器错误分类，以及一个使用 `httpx.MockTransport` 的完整闭环测试。
 
-## 后续开发顺序
+真实 LLM 测试被标记为 `integration`，没有配置时会跳过：
 
-1. 实现历史摘要、覆盖范围和增量 Context 压缩。
-2. 实现结构化 Trace 与敏感字段脱敏。
-3. 接入真实 LLM 适配器和 CLI，最后进行端到端验收。
+```bash
+uv run pytest -m integration -q
+```
 
-更细的任务、分层职责和验收标准见 `docs/development-plan.md`；开发红线和提交规范见 `AGENTS.md`。
+因此，Mock 闭环通过不等于已经完成真实供应商联调；真实联调必须在配置有效的环境中单独执行并记录结果。
+
+## 开发计划
+
+详细阶段、验收标准和未完成事项见 [docs/development-plan.md](docs/development-plan.md)。开发红线和提交规范见 [AGENTS.md](AGENTS.md)。
