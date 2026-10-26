@@ -15,6 +15,7 @@ from yjy_agent_runtime.domain import (
     SessionSummary,
     ToolCall,
     ToolResult,
+    TraceEvent,
 )
 
 
@@ -94,6 +95,6 @@ class SessionStore(Protocol):
 class TraceRecorder(Protocol):
     """记录公开、结构化且可关联的运行事件。"""
 
-    def record(self, event: str, **attributes: object) -> None:
+    def record(self, event: TraceEvent) -> None:
         """追加一条运行事件。"""
         ...

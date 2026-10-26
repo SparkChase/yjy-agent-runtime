@@ -83,6 +83,7 @@ def test_final_result_requires_answer() -> None:
     with pytest.raises(ValueError, match="requires answer"):
         RunResult(
             session_id="session-1",
+            run_id="run-1",
             trace_id="trace-1",
             termination_reason=TerminationReason.FINAL_ANSWER,
             iterations=1,

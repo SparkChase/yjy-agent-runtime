@@ -15,6 +15,8 @@ from yjy_agent_runtime.domain import (
     ToolCallDecision,
     ToolResult,
     ToolResultStatus,
+    TraceEvent,
+    TraceEventType,
 )
 from yjy_agent_runtime.infrastructure.session import InMemorySessionStore
 from yjy_agent_runtime.infrastructure.tools import (
@@ -77,8 +79,8 @@ class InMemoryTraceRecorder:
     def __init__(self) -> None:
         self.events: list[tuple[str, dict[str, object]]] = []
 
-    def record(self, event: str, **attributes: object) -> None:
-        self.events.append((event, attributes))
+    def record(self, event: TraceEvent) -> None:
+        self.events.append((event.event_type, dict(event.attributes)))
 
 
 class FailingContextProvider:
@@ -251,17 +253,14 @@ def test_loop_returns_context_error_and_records_original_error() -> None:
 
     assert result.termination_reason is TerminationReason.CONTEXT_ERROR
     assert result.iterations == 1
-    assert trace.events[-2] == (
-        "dependency_failed",
-        {
-            "session_id": "session-a",
-            "trace_id": result.trace_id,
-            "iteration": 1,
-            "stage": "context",
-            "error_type": "RuntimeError",
-            "error_message": "context unavailable",
-        },
-    )
+    dependency_event, attributes = trace.events[-2]
+    assert dependency_event is TraceEventType.DEPENDENCY_FAILED
+    assert trace.events[-2][0] is TraceEventType.DEPENDENCY_FAILED
+    assert attributes == {
+        "stage": "context",
+        "error_type": "RuntimeError",
+        "error_message": "context unavailable",
+    }
     assert trace.events[-1][1]["reason"] == "context_error"
 
 
@@ -331,3 +330,25 @@ def test_loop_with_registry_executor_returns_unknown_tool_error_to_next_round() 
     assert result.answer == "工具不存在。"
     assert context.seen_results[1][0].status is ToolResultStatus.ERROR
     assert context.seen_results[1][0].error_type == "UnknownToolError"
+
+
+def test_loop_returns_invalid_decision_termination() -> None:
+    class InvalidLLM:
+        def decide(self, messages: Sequence[Message]) -> AgentDecision:
+            del messages
+            return object()  # type: ignore[return-value]
+
+    trace = InMemoryTraceRecorder()
+    loop = AgentLoop(
+        context_provider=StubContextProvider(),
+        llm_client=InvalidLLM(),
+        session_store=InMemorySessionStore(),
+        tool_executor=StubToolExecutor(),
+        trace_recorder=trace,
+    )
+
+    result = loop.run(RunRequest("session-a", "产生非法决策"))
+
+    assert result.termination_reason is TerminationReason.INVALID_DECISION
+    assert trace.events[-2][0] is TraceEventType.DEPENDENCY_FAILED
+    assert trace.events[-2][1]["stage"] == "decision"

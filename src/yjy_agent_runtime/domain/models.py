@@ -195,6 +195,8 @@ class TerminationReason(StrEnum):
     MAX_ITERATIONS = "max_iterations"
     LLM_ERROR = "llm_error"
     CONTEXT_ERROR = "context_error"
+    TOOL_ERROR = "tool_error"
+    INVALID_DECISION = "invalid_decision"
     CANCELLED = "cancelled"
 
 
@@ -217,14 +219,15 @@ class RunResult:
     """一次运行的可审计结果，不使用模糊字符串表示终止状态。"""
 
     session_id: str
+    run_id: str
     trace_id: str
     termination_reason: TerminationReason
     iterations: int
     answer: str | None = None
 
     def __post_init__(self) -> None:
-        if not self.session_id or not self.trace_id:
-            raise ValueError("run result requires session id and trace id")
+        if not self.session_id or not self.run_id or not self.trace_id:
+            raise ValueError("run result requires session, run and trace ids")
         if self.iterations < 0:
             raise ValueError("iterations must not be negative")
         if (
