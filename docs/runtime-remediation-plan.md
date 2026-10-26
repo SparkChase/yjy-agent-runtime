@@ -69,7 +69,10 @@ interfaces ──► infrastructure ──► agent ──► domain
 
 ## 3. 问题、修复与验收
 
-### P0-01：空目录造成“模块没有实现”的误解
+> 状态图例：**[已修复]** 已实现、测试并提交；**[未修复]** 尚待处理。
+> 逐条进度与提交哈希见第 4、5 节。
+
+### P0-01 [已修复]：空目录造成“模块没有实现”的误解
 
 现象：
 
@@ -88,7 +91,7 @@ interfaces ──► infrastructure ──► agent ──► domain
 - 架构测试通过。
 - 新读者只看 README 能准确找到 LLM、Session、Tool、Trace、Context 的实现位置。
 
-### P1-01：Context 压缩没有真正减少输入
+### P1-01 [未修复]：Context 压缩没有真正减少输入
 
 现象：
 
@@ -113,7 +116,7 @@ interfaces ──► infrastructure ──► agent ──► domain
 - 断言摘要失败后覆盖范围不变，下一次可以重试。
 - 用真实 LLM 做一次“早期事实追问”，回答必须包含预置事实，不能只依赖 Mock。
 
-### P1-02：工具结果缺少模型可用的结构化元数据
+### P1-02 [未修复]：工具结果缺少模型可用的结构化元数据
 
 现象：
 
@@ -135,7 +138,7 @@ interfaces ──► infrastructure ──► agent ──► domain
 - 模型 Context 中能明确区分 `success` 与 `error`，并看到对应工具名和参数。
 - 真实 LLM 在一次任务中连续调用至少两个工具后，最终回答能引用工具结果。
 
-### P1-03：工具超时后仍可能发生副作用
+### P1-03 [未修复]：工具超时后仍可能发生副作用
 
 现象：
 
@@ -156,7 +159,7 @@ interfaces ──► infrastructure ──► agent ──► domain
 - 无副作用慢工具仍返回结构化 `TimeoutError`。
 - 测试覆盖同步副作用路径、协作取消路径和纯工具超时路径。
 
-### P1-04：CLI 配置入口和默认超时不可用
+### P1-04 [已修复]：CLI 配置入口和默认超时不可用
 
 现象：
 
@@ -179,7 +182,7 @@ interfaces ──► infrastructure ──► agent ──► domain
 - 缺少配置时给出明确错误，不发起网络请求。
 - 真实 CLI 在默认配置下完成一次多轮工具任务，退出码为 0。
 
-### P1-05：默认测试可能访问真实网络
+### P1-05 [已修复]：默认测试可能访问真实网络
 
 现象：
 
@@ -199,7 +202,7 @@ interfaces ──► infrastructure ──► agent ──► domain
 - 未配置时执行 `uv run pytest -m integration -q`，明确 skip 并说明原因。
 - 配置有效时执行真实入口，测试真实通过。
 
-### P1-06：真实集成测试没有驱动 Agent Loop
+### P1-06 [未修复]：真实集成测试没有驱动 Agent Loop
 
 现象：
 
@@ -223,7 +226,7 @@ interfaces ──► infrastructure ──► agent ──► domain
 - 测试输出包含真实模型标识、耗时、工具调用次数和 Trace 路径；不输出 API Key。
 - 任一场景失败时保留原始错误和 Trace，不用 Mock 或重试伪造成功。
 
-### P1-07：CLI Trace 不可见且信息不完整
+### P1-07 [已修复]：CLI Trace 不可见且信息不完整
 
 现象：
 
@@ -246,7 +249,7 @@ interfaces ──► infrastructure ──► agent ──► domain
 - 人为注入 `api_key`、`token`、`cookie` 等字段，文件中只出现 `[REDACTED]`。
 - Trace 写入失败时 CLI 返回非零退出码并给出可诊断错误。
 
-### P2-01：Session 工具交互不是原子写入
+### P2-01 [未修复]：Session 工具交互不是原子写入
 
 现象：
 
@@ -265,7 +268,7 @@ interfaces ──► infrastructure ──► agent ──► domain
 - 模拟第二次写入失败时，不出现半条交互。
 - 两个 Session 的工具数据仍然完全隔离。
 
-### P2-02：计算工具存在资源耗尽风险
+### P2-02 [未修复]：计算工具存在资源耗尽风险
 
 现象：
 
@@ -282,7 +285,7 @@ interfaces ──► infrastructure ──► agent ──► domain
 - 超长表达式、超大指数和非法语法快速失败。
 - 测试不会因资源耗尽而卡住。
 
-### P2-03：文档与代码能力不一致
+### P2-03 [部分修复]：文档与代码能力不一致
 
 现象：
 
@@ -307,23 +310,61 @@ interfaces ──► infrastructure ──► agent ──► domain
 
 每个步骤独立提交，提交前检查 `git status --short` 和 diff，不使用 `git add -A`。
 
-| 顺序 | 任务 | 主要改动 | 独立提交 |
+| 顺序 | 任务 | 状态 | 提交 |
 | --- | --- | --- | --- |
-| 1 | 架构清理 | 删除空占位目录、明确 README 分层、增加架构测试 | `refactor: 清理空包并固定分层边界` |
-| 2 | 配置与 CLI | `.env` 加载、超时配置、统一装配入口 | `feat(cli): 支持本地配置与真实服务超时` |
-| 3 | Trace | JSONL Recorder、CLI 路径、工具参数和结果摘要 | `feat(trace): 增加可落盘的脱敏运行轨迹` |
-| 4 | Context | 有界摘要、总预算、工具交互元数据 | `fix(context): 实现有界压缩与工具结果元数据` |
-| 5 | 工具执行 | 副作用工具超时语义、计算资源限制 | `fix(tools): 修正超时副作用与计算边界` |
-| 6 | Session | 原子工具交互、一致性校验 | `fix(session): 原子保存工具调用与结果` |
-| 7 | 测试矩阵 | 离线回归、真实 LLM 端到端、CLI 测试 | `test: 补齐真实 LLM 与异常路径验收` |
-| 8 | 文档与验收 | README、开发计划、审计记录、真实结果 | `docs: 记录真实 LLM 验收结果` |
+| 0 | 修复与验收计划 | 已完成 | `a20b680` |
+| 1 | 架构清理 | 已完成 | `84223dc` |
+| 2 | 配置与 CLI | 已完成 | `ac76cae`、`70f21ba` |
+| 3 | Trace | 已完成 | `d60f849`、`f324ad8`、`aa620fc`、`19e3cfa` |
+| 4 | Context 压缩 | **未开始（下一步）** | 预期 `fix(context): 实现有界压缩与工具结果元数据` |
+| 5 | 工具执行 | 未开始 | 预期 `fix(tools): 修正超时副作用与计算边界` |
+| 6 | Session 原子写 | 未开始 | 预期 `fix(session): 原子保存工具调用与结果` |
+| 7 | 测试矩阵 | 部分完成（Trace/CLI/配置/架构测试已随各步补齐；真实端到端未做） | 预期 `test: 补齐真实 LLM 与异常路径验收` |
+| 8 | 文档与真实验收 | 部分完成（逐层与逐文件文档已写；最终真实验收未做） | 预期 `docs: 记录真实 LLM 验收结果` |
 
 现有未提交修改不属于本计划，不应混入上述提交。若这些修改与某项修复重叠，先由用户确认其归属，
 再按功能拆分提交。
 
-## 5. 验收矩阵
+## 5. 已完成步骤的证据（截至 2026-10-26）
 
-### 5.1 离线门禁
+计划起点为 `7d13d36`。以下步骤已实现、测试并提交，工作区保持干净。
+
+### Step 1 架构清理（`84223dc`）
+
+- 删除只有 `.gitkeep` 的五个顶层空包 `llm/session/tools/trace/context`（逐个显式路径删除）。
+- `ToolDefinition` / `Tool` 契约上移到 `agent/ports.py`，`infrastructure/tools/registry.py` 保留 re-export。
+- 新增 `tests/test_architecture.py`，静态校验 `interfaces -> infrastructure -> agent -> domain`。
+- 新增 `docs/architecture-layers.md`。
+
+### Step 2 配置与 CLI（`ac76cae`）
+
+- `interfaces/config.py`：解析 `.env`、显式环境变量优先、`--env-file` / `--no-env-file`。
+- 默认读取超时 120s，新增 `LLM_CONNECT_TIMEOUT_SECONDS=10`，改用分阶段 `httpx.Timeout`。
+- `tests/test_config.py` 覆盖解析、优先级、禁用与错误语义。
+
+### Step 3 Trace（`d60f849`、`f324ad8`、`aa620fc`、`19e3cfa`）
+
+- `trace/` 拆分为 `redaction.py`（共享脱敏）、`in_memory.py`、`jsonl.py`、`fanout.py`。
+- `AgentLoop` Trace 增加 `prompt_chars`、工具 `arguments`、`result_summary`，按上限截断。
+- CLI `--trace-file` / `--no-trace` / `YJY_TRACE_DIR`，成功与失败都打印 trace 路径。
+- `tests/conftest.py` 让默认门禁排除 integration。
+- 新增 `tests/test_jsonl_trace.py`、`tests/test_loop_trace.py`、`tests/test_cli.py`。
+
+真实 LLM 证据（默认 `.env`，多工具任务）：Trace 14 行，`calculator` 得 `3973`、`todo` 写入待办、终止原因 `final_answer`；工具参数与结果摘要齐全，`run_id/trace_id/session_id` 可关联，文件中无 API Key。
+
+### 当前门禁基线
+
+```text
+uv run --locked ruff check .                 # 通过
+uv run --locked pytest -q                    # 111 passed, 1 deselected
+uv run --locked python scripts/verify_md_links.py     # 通过
+uv run --locked python scripts/verify_doc_budgets.py  # 通过
+uv run --locked --env-file .env pytest -m integration -q   # 1 passed（真实单次决策）
+```
+
+## 6. 验收矩阵
+
+### 6.1 离线门禁
 
 ```bash
 uv run --locked pytest -q
@@ -338,7 +379,7 @@ uv run --locked python scripts/verify_doc_budgets.py
 - 所有单元测试和 Mock 闭环测试通过。
 - 静态检查、链接检查和文档预算检查通过。
 
-### 5.2 真实 LLM 门禁
+### 6.2 真实 LLM 门禁
 
 以下命令必须使用真实配置，不能替换为 MockTransport、预设决策或手工伪造的 Session：
 
@@ -367,7 +408,7 @@ uv run --locked --env-file .env yjy-agent-runtime \
 - 第三次 CLI 不包含第一个 Session 的待办，证明隔离。
 - Trace 文件存在，包含工具参数、结果摘要和 `final_answer` 终止原因，敏感字段已脱敏。
 
-### 5.3 压缩后追问的真实 LLM 验收
+### 6.3 压缩后追问的真实 LLM 验收
 
 预置一个包含早期事实的长 Session，例如早期用户消息写明“验收代号是 ORANGE-42”，再追加
 足够多的历史触发压缩，然后用真实 LLM 提问：
@@ -383,7 +424,7 @@ uv run --locked --env-file .env yjy-agent-runtime \
 - Session 摘要覆盖范围正确推进，且没有把其他 Session 的内容带入。
 - 该场景的 Trace 记录压缩前后的消息数量和字符数。
 
-### 5.4 证据记录
+### 6.4 证据记录
 
 验收记录至少包含：
 
@@ -395,10 +436,63 @@ uv run --locked --env-file .env yjy-agent-runtime \
 
 Mock 测试只能作为回归门禁，不能计入真实 LLM 验收通过项。
 
-## 6. 需要确认的三个决策
+## 7. 已确认的决策
 
-1. **目录命名**：建议保留 `agent/` 作为应用层，不重命名为 `application/`，以减少无收益改动；如果你希望目录名直接体现“应用层”，可以在实施前改为 `application/`。
-2. **`.env` 行为**：建议 CLI 默认加载当前目录 `.env`，并支持 `--no-env-file` 关闭；显式环境变量优先。这样普通 `uv run` 可以直接运行，但测试仍可完全隔离。
-3. **真实验收成本**：真实 LLM 验收会发起多次请求并可能产生费用。建议按上面的 4 条 CLI 命令和集成测试执行一次；如果模型没有按提示调用工具，应保留失败证据并调整提示或实现，不能用 Mock 替代。
+1. **目录命名**：保留 `agent/` 作为应用层，不重命名；重点是分层清晰，且由架构测试守护。
+2. **`.env` 行为**：CLI 默认加载当前目录 `.env`，支持 `--no-env-file` 关闭，显式环境变量优先（已实现）。
+3. **真实验收成本**：真实验收必须打真实付费 LLM，不能用 Mock 或预设决策代替（已确认）。
+4. **入口形态**：CLI 可验收即可，不强制 HTTP；后续如需 HTTP 入口，复用同一套 `agent` 与 `infrastructure`。
+5. **代码可读性**：要求注释清楚、分层清楚、逐层数据流写清楚（已通过 `docs/architecture-layers.md` 落地，后续步骤需延续）。
 
-以上三点确认后再进入实施。若没有异议，我按第 4 节的顺序逐项修复、测试、提交，并在最后给出真实 LLM 验收记录。
+## 8. 下一步交接：Step 4 Context 有界压缩
+
+### 8.1 目标
+
+当前压缩是"假压缩"：`ExtractiveHistorySummarizer` 把旧摘要与每条旧消息全文拼接，
+摘要无长度上限，模型输入也无总预算。用 100 条、每条约 1000 字符的历史可复现约
+10 万字符的模型输入。Step 4 要让"压缩"真正减少输入，同时不丢早期关键事实。
+
+### 8.2 要改的文件
+
+- `src/yjy_agent_runtime/infrastructure/context/builder.py`（主改动）
+- 可能扩展 `agent/ports.py` 的 `HistorySummarizer` 契约
+- 测试：`tests/test_context_builder.py`，可新增 `tests/test_context_budget.py`
+
+### 8.3 具体要求
+
+1. `ContextConfig` 增加 `max_summary_chars` 与 `max_context_chars`，均须为正整数并在构造期校验。
+2. 摘要器输出受 `max_summary_chars` 约束：按行累积，保留首尾关键内容，写入明确截断标记。
+3. 摘要前先对单条工具结果套用 `max_tool_result_chars`，避免长工具结果绕过限制进入摘要。
+4. 组装完成后，若整个模型输入超过 `max_context_chars`，按完整消息边界裁剪最近历史，
+   并同步推进 `summary.covered_message_count`，保持其单调、不重复、不遗漏。
+5. 摘要失败时不推进覆盖范围，下一轮可安全重试（沿用现有语义）。
+6. 不拆分"工具调用 + 工具结果"这一组交互。
+7. 保持"不把私有思维链写入摘要/Context"。
+
+### 8.4 验收标准
+
+离线：
+
+- 构造 100 条、每条约 1000 字符历史，断言模型输入总字符 ≤ `max_context_chars`，摘要 ≤ `max_summary_chars`。
+- 早期事实在压缩后仍能在 Context 中体现。
+- `covered_message_count` 正确、不重复摘要、不遗漏消息。
+- 摘要失败后覆盖范围不变。
+- 工具结果不因进入摘要而绕过长度限制。
+
+真实 LLM（必须真实付费调用，不能用 Mock）：
+
+- 预置含早期事实的长 Session（例如早期写入"验收代号是 ORANGE-42"），触发压缩后追问；
+  模型回答必须包含 `ORANGE-42`。
+- 记录本次真实输入的字符数与压缩前后消息数。
+
+### 8.5 完成定义
+
+按仓库规范：行为满足验收、异常与边界已处理、测试真实通过、文档同步、无敏感信息泄露，
+并且独立提交（预期提交信息 `fix(context): 实现有界压缩与工具结果元数据`）。
+
+### 8.6 继任者注意
+
+- 起始状态：`git status` 干净，HEAD 为 Step 3 后的提交。
+- 默认门禁已是 `pytest -q`（自动排除 integration）；真实测试用 `uv run --locked --env-file .env pytest -m integration -q`。
+- 真实验收会真实产生费用，必须执行。
+- 每完成一个小功能立即独立提交，提交前看 `git status --short` 与 diff，不使用 `git add -A`。
