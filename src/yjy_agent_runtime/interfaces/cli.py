@@ -1,6 +1,7 @@
 """YJY Agent Runtime 的最小命令行入口。
 
-一次 CLI 进程只处理一条用户消息，内部可能循环多轮工具调用，最后输出最终回答。
+默认一次 CLI 进程只处理一条用户消息，内部可能循环多轮工具调用，最后输出最终回答。
+加上 ``--interactive`` 后，进程不退出，循环读取多轮输入，并复用同一个 Session。
 入口层只做三件事：解析参数、装配具体实现、打印结果；Agent 的执行逻辑全部在
 `agent.AgentLoop` 里。
 
@@ -51,6 +52,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("message", nargs="?", help="用户输入；省略时从 stdin 读取")
     parser.add_argument("--session-id", default="default", help="Session 标识")
     parser.add_argument("--max-iterations", type=int, default=8)
+    parser.add_argument(
+        "-i",
+        "--interactive",
+        action="store_true",
+        help="进入交互式多轮对话；同一进程内复用 --session-id 指定的 Session",
+    )
     parser.add_argument(
         "--env-file",
         default=None,
@@ -107,13 +114,17 @@ class TraceSink:
         if self._file is not None:
             self._file.close()
 
-    def latest_dependency_error(self):
-        """返回最近一次依赖失败事件，供失败诊断使用。"""
+    def latest_dependency_error(self, since: int = 0):
+        """返回 ``since`` 之后最近一次依赖失败事件，供失败诊断使用。
+
+        交互模式下每轮都会复用同一个 TraceSink，必须只看本轮新增的事件，
+        否则会把上一轮的错误误报成这一轮的错误。
+        """
 
         return next(
             (
                 event
-                for event in reversed(self.memory.events)
+                for event in reversed(self.memory.events[since:])
                 if event.event_type.value == "dependency_failed"
             ),
             None,
@@ -148,10 +159,6 @@ def main(argv: list[str] | None = None) -> int:
     """读取一次用户输入，调用真实 LLM 并输出最终结果。"""
 
     args = build_parser().parse_args(argv)
-    user_input = args.message or sys.stdin.readline().strip()
-    if not user_input:
-        print("请输入非空消息。", file=sys.stderr)
-        return 2
 
     try:
         prepare_environment(
@@ -172,6 +179,18 @@ def main(argv: list[str] | None = None) -> int:
                 trace=trace,
                 max_iterations=args.max_iterations,
             )
+            if args.interactive:
+                # 交互模式自己读取多轮输入，不消费一次性模式的那一行 stdin。
+                return _run_interactive(
+                    loop,
+                    args.session_id,
+                    trace,
+                    initial=args.message,
+                )
+            user_input = args.message or sys.stdin.readline().strip()
+            if not user_input:
+                print("请输入非空消息。", file=sys.stderr)
+                return 2
             result = loop.run(RunRequest(args.session_id, user_input))
         finally:
             llm.close()
@@ -183,6 +202,100 @@ def main(argv: list[str] | None = None) -> int:
 
     _report_trace_path(trace.path)
     return _report_result(result, trace)
+
+
+def _run_interactive(
+    loop: AgentLoop,
+    session_id: str,
+    trace: TraceSink,
+    *,
+    initial: str | None = None,
+) -> int:
+    """在同一进程里连续多轮对话，复用同一个 Session。
+
+    与一次性模式的区别只有两点：
+
+    1. 进程不退出，循环读取用户输入；
+    2. 每一轮都复用同一个 ``session_id``，所以历史会自然累积。
+
+    这里不做流式输出，也不改变模型调用次数：每条消息仍然要等模型返回。
+    交互模式解决的是“反复启动进程、反复输入 session id”的麻烦，不是延迟。
+    """
+
+    print(
+        f"session: {session_id}"
+        "（/exit 退出，/new <id> 切换会话，/help 查看命令）",
+        file=sys.stderr,
+    )
+    _report_trace_path(trace.path)
+
+    pending = [initial] if initial else []
+    while True:
+        if pending:
+            text = pending.pop(0)
+            print(f"你> {text}")
+        else:
+            try:
+                text = input("你> ")
+            except (EOFError, KeyboardInterrupt):
+                print(file=sys.stderr)
+                break
+
+        text = text.strip()
+        if not text:
+            continue
+        if text in {"/exit", "/quit"}:
+            break
+        if text == "/help":
+            print(
+                "命令：/exit 退出；/new <session-id> 切换会话；"
+                "其它输入作为用户消息。",
+                file=sys.stderr,
+            )
+            continue
+        if text.startswith("/new"):
+            new_session_id = text[len("/new") :].strip()
+            if not new_session_id:
+                print("用法：/new <session-id>", file=sys.stderr)
+                continue
+            session_id = new_session_id
+            print(f"已切换到 session: {session_id}", file=sys.stderr)
+            continue
+
+        # 只检查本轮新增的 Trace 事件，避免把上一轮的错误误报给这一轮。
+        started = len(trace.memory.events)
+        try:
+            result = loop.run(RunRequest(session_id, text))
+        except KeyboardInterrupt:
+            # 模型调用可能持续十几秒，允许用户中断本轮而不退出整个对话。
+            print("\n已中断本轮。", file=sys.stderr)
+            continue
+        except Exception as error:  # noqa: BLE001
+            print(f"本轮失败：{type(error).__name__}: {error}", file=sys.stderr)
+            continue
+
+        if result.answer is not None:
+            print(f"助手> {result.answer}")
+            continue
+
+        print(
+            f"运行未返回最终答案，终止原因：{result.termination_reason.value}",
+            file=sys.stderr,
+        )
+        failure = trace.latest_dependency_error(since=started)
+        if failure is not None:
+            attributes = failure.attributes
+            print(
+                "依赖错误："
+                f"iteration={failure.iteration} "
+                f"stage={attributes.get('stage')} "
+                f"type={attributes.get('error_type')} "
+                f"message={attributes.get('error_message')}",
+                file=sys.stderr,
+            )
+
+    print("已退出。", file=sys.stderr)
+    return 0
 
 
 def _report_trace_path(path: Path | None) -> None:

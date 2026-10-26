@@ -97,6 +97,14 @@ YJY_SESSION_DIR=.yjy-sessions uv run yjy-agent-runtime --session-id demo "请计
 
 单次运行的轮次上限可通过 `--max-iterations` 设置，默认值为 8。
 
+想连续多轮对话，加 `--interactive`，进程不退出并复用同一个 Session：
+
+```bash
+uv run yjy-agent-runtime --interactive --session-id chat
+```
+
+交互模式支持 `/exit` 退出、`/new <session-id>` 切换会话、`/help` 查看命令。
+
 每次运行都会把脱敏后的运行轨迹写入 JSONL。默认路径为 `logs/<session-id>.jsonl`，
 可用 `--trace-file <path>` 指定，或用 `--no-trace` 关闭。CLI 在 stderr 打印实际路径。
 

@@ -56,6 +56,7 @@ def test_build_parser_defaults() -> None:
     assert args.trace_file is None
     assert args.no_trace is False
     assert args.no_env_file is False
+    assert args.interactive is False
 
 
 def test_resolve_trace_path_explicit_file() -> None:
@@ -118,6 +119,37 @@ def test_main_can_disable_trace_file(
     assert exit_code == 0
     assert "trace:" not in captured.err
     assert not (tmp_path / "traces").exists()
+
+
+def test_main_interactive_reuses_session_until_exit(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """交互模式应在同一进程内复用 Session，并支持 /new 切换。"""
+
+    loop = StubLoop()
+    monkeypatch.setattr(cli, "build_loop", lambda **_kwargs: loop)
+    inputs = iter(["第一句", "第二句", "/new other", "第三句", "/exit"])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(inputs))
+
+    exit_code = cli.main(
+        ["--interactive", "--no-trace", "--session-id", "chat"]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert [request.session_id for request in loop.requests] == [
+        "chat",
+        "chat",
+        "other",
+    ]
+    assert [request.user_input for request in loop.requests] == [
+        "第一句",
+        "第二句",
+        "第三句",
+    ]
+    assert captured.out.count("助手> 完成") == 3
+    assert "已切换到 session: other" in captured.err
 
 
 def test_main_reports_missing_message(
