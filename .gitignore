@@ -33,3 +33,6 @@ logs/
 *.log
 .yjy-sessions/
 
+# Local agent workspace data
+.workbuddy-ai/
+
