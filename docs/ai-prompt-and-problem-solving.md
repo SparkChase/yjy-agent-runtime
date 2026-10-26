@@ -69,6 +69,24 @@ GitHub remote 和 GitHub 提交不属于本次任务范围。
 
 解决：默认测试使用 `httpx.MockTransport` 验证完整闭环；真实测试标记为 `integration`，无配置时明确 skip。没有把 Mock 结果伪装成真实供应商调用结果。
 
+### 问题六：CLI 退出码与 docstring 约定相反
+
+现象：两处退出码和 `cli.py` docstring 的约定对不上，且都没有测试覆盖，门禁全绿也发现不了。
+
+- `_run_interactive` 结尾固定 `return 0`。某一轮以 `llm_error` 结束、或 `loop.run` 直接抛异常时，进程仍然退出 0，脚本和 CI 会把失败判成成功。
+- `--max-iterations 0` 的校验写在 `LoopConfig.__post_init__`，而 `LoopConfig` 在 `build_loop` 里构造，抛出的 `ValueError` 被 `main` 的运行失败分支捕获，退出码 1；docstring 约定“参数或配置有问题，根本没有发起运行”应为 2。
+
+根因：`main` 把“参数/配置阶段”和“运行阶段”塞进同一个 `try`，退出码只能区分“有没有抛异常”，区分不了“有没有发起运行”；交互模式的返回值只表达“进程正常退出”，不表达“每一轮是否拿到答案”。
+
+解决（`95d892e`）：
+
+- `main` 拆成参数预检、配置阶段、运行阶段三段。`--max-iterations < 1` 在装配依赖前返回 2；配置阶段只捕获 `EnvFileError`、`LLMConfigurationError` 和 `.env` 读写/解码错误并返回 2，其余异常照常抛出，不把代码缺陷伪装成配置问题。
+- `_run_interactive` 用 `failed` 标记汇总每轮结果：任一轮没拿到最终答案就返回 1，先失败后成功仍是失败；用户 Ctrl-C 主动中断的那一轮不计为失败。
+- 配置失败不再创建 `TraceSink`，不会为一次没发起的运行留下空 trace 文件。
+- 缺失 `LLM_API_KEY` / `LLM_BASE_URL` 的退出码由 1 改为 2，与 docstring 对齐，原先断言 1 的两个测试同步更新。
+
+验证：新增 4 个用例覆盖交互模式失败轮、异常轮、先失败后成功、`--max-iterations 0`；修复前后用探针脚本实测，同一场景的退出码从 `0 / 1` 变为 `1 / 2`；离线门禁 132 passed, 2 deselected。
+
 ## 4. 可复现验证命令
 
 ```bash
