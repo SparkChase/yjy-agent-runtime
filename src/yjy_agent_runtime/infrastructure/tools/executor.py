@@ -70,14 +70,14 @@ class RegistryToolExecutor:
             raise ValueError("session id must not be empty")
 
         try:
-            tool = self._registry.get(call.name)
+            tool = self._registry.get(call.name) # 1.注册表 挡住模型编了一个不存在的工具名
         except KeyError as error:
             return self._error_result(call, "UnknownToolError", str(error))
 
         try:
             validate(
                 instance=dict(call.arguments),
-                schema=dict(tool.definition.parameters),
+                schema=dict(tool.definition.parameters), # 2.schema 挡住缺必填参数、类型错、多传了字段
             )
         except ValidationError as error:
             return self._error_result(
@@ -93,7 +93,7 @@ class RegistryToolExecutor:
             )
 
         try:
-            content, semantics = self._dispatch(tool, session_id, call.arguments)
+            content, semantics = self._dispatch(tool, session_id, call.arguments)  #3.执行 挡住工具内部抛异常、超时
         except ToolExecutionTimeout as error:
             return self._error_result(
                 call,
@@ -108,7 +108,7 @@ class RegistryToolExecutor:
                 str(error) or "tool execution failed",
             )
 
-        if not isinstance(content, str):
+        if not isinstance(content, str): # 4.执行校验 挡住工具返回了非字符串或空字符串
             return self._error_result(
                 call,
                 "InvalidToolResultError",
@@ -140,13 +140,14 @@ class RegistryToolExecutor:
         """按副作用标记选择执行方式，并返回对应的超时语义。"""
 
         if tool.definition.has_side_effects:  # type: ignore[attr-defined]
-            if hasattr(tool, "invoke_with_session_deadline"):
-                return self._invoke_cooperatively(tool, session_id, arguments)
+            if hasattr(tool, "invoke_with_session_deadline"): # 场景2:有副作用，且工具支持协作闹钟 -> 走协作超时
+                return self._invoke_cooperatively(tool, session_id, arguments)  # COOPERATIVE
+            # 场景 3：有副作用，但工具不支持协作 -> 坚决不给超时，同步硬等！
             return (
                 self._invoke_inline(tool, session_id, arguments),
                 TimeoutSemantics.SYNCHRONOUS,
             )
-
+        # # 场景 1：完全没副作用的只读工具 -> 放心用线程跑超时，超时直接扔掉
         if hasattr(tool, "invoke_with_session"):
             return (
                 self._invoke_with_timeout(

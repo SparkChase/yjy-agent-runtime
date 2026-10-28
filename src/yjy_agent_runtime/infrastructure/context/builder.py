@@ -131,7 +131,7 @@ def _take_tail_lines(content: str, budget: int) -> str:
 class ContextConfig:
     """Context 的可解释安全边界。"""
 
-    system_prompt: str = "你是一个可靠的 Agent Runtime 助手。"
+    system_prompt: str = "你是一个可靠的 Agent Runtime 助手。" #  instruction
     max_history_messages: int = 20
     max_tool_result_chars: int = 2_000
     max_summary_chars: int = 4_000
@@ -146,7 +146,7 @@ class ContextConfig:
         _require_positive_int("max_context_chars", self.max_context_chars)
 
 
-class ExtractiveHistorySummarizer:
+class ExtractiveHistorySummarizer: # 拼接 + 截断
     """以角色标记合并公开历史，作为无需外部模型的基础摘要器。"""
 
     _ROLE_LABELS: ClassVar[dict[MessageRole, str]] = {
@@ -174,6 +174,9 @@ class ExtractiveHistorySummarizer:
         )
         return truncate_summary("\n".join(lines), self._max_summary_chars)
 
+
+# 压缩 working context        memory  longtime context    检索： recall k/n     precision  /  balance         personal agent E2B microVM     docker
+# 1-2w 实习能够抵用试用期吗？                                
 
 class ContextBuilder:
     """构建当前 Session 的增量摘要和最近消息窗口。"""
@@ -243,7 +246,7 @@ class ContextBuilder:
         # 它只能单调递增，否则同一批消息会被重复摘要。
         covered = original_covered
 
-        # 第一层：消息条数预算。目标是“移出最近窗口”的旧消息前缀。
+        # 第一层：消息条数预算。目标是“移出最近窗口”的旧消息前缀。 消息条数 > 20 把移出窗口的旧消息**整批**摘要
         target_count = min(
             len(session.messages),
             max(0, len(session.messages) - self._config.max_history_messages),
@@ -252,7 +255,7 @@ class ContextBuilder:
             target_count = max(
                 covered,
                 self._group_floor(session.messages, target_count),
-            )
+            ) # 分组保证一次工具交互**要么完整保留，要么完整进摘要**。 所以第一层的取整要向下对齐
             if target_count > covered:
                 summary_content = self._summarize_batch(
                     session,
@@ -270,7 +273,7 @@ class ContextBuilder:
             envelopes,
         )
 
-        # 第二层：总字符预算。仍超预算时按完整消息组继续摘要旧消息。
+        # 第二层：总字符预算。仍超预算时按完整消息组继续摘要旧消息。 总字符 > 24000 按**完整消息组**继续往摘要里推
         while self._context_chars(context) > self._config.max_context_chars:
             next_covered = self._next_group_boundary(session.messages, covered)
             last_group_start = self._last_group_start(session.messages)
@@ -291,7 +294,7 @@ class ContextBuilder:
                 envelopes,
             )
 
-        # 第三层：最近消息组不能拆；若仍超预算，只缩短摘要的“展示长度”。
+        # 第三层：最近消息组不能拆；若仍超预算，只缩短摘要的“展示长度”。还是超  只缩短摘要的**展示长度**，最近消息不动
         # 存储摘要仍受 max_summary_chars 约束，覆盖范围不变。
         if self._context_chars(context) > self._config.max_context_chars and (
             summary_content is not None
@@ -317,13 +320,19 @@ class ContextBuilder:
 
         # 走到这里说明“只剩最后一组消息”仍然超预算。本版本不拆分单条消息，
         # 所以单条超长输入（例如一次粘贴几万字）会以 context_error 终止，而不是
-        # 被静默截断。这是有意的取舍：宁可明确失败，也不把用户输入改得面目全非。
+        # 被静默截断。这是有意的取舍：宁可明确失败，也不把用户输入改得面目全非。 只剩最后一组仍超 抛 `ContextBudgetError` → `context_error` 终止
         if self._context_chars(context) > self._config.max_context_chars:
             raise ContextBudgetError(
                 "context cannot fit within max_context_chars without splitting a message"
             )
 
-        # 只有成功组装后才落盘，失败时覆盖范围保持原值，下一轮可重试。
+        # 只有成功组装后才落盘，失败时覆盖范围保持原值，下一轮可重试。 摘要先在内存里累积，整个 Context 组装成功才写回 Session。
+        #
+        # **为什么？** 因为如果边摘要边写，摘要器在中途抛错，就会留下
+        # "覆盖范围前进了、摘要却没写完"的坏状态——那批消息既不在摘要里、也不在窗口里，
+        # **永久丢失**。
+        #
+        # 这是一个典型的"要么全成、要么全不动"：内存里算完，一次提交。
         if summary_content is not None and (
             covered > original_covered
             or (
@@ -386,7 +395,7 @@ class ContextBuilder:
             ),
         )
 
-    def _system_content(self) -> str:
+    def _system_content(self) -> str: # 序列化成 JSON 拼进同一条 system 消息（`builder.py:389`）
         if not self._tool_definitions:
             return self._config.system_prompt
         definitions = [

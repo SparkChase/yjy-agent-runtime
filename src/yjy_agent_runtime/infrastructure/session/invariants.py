@@ -20,7 +20,7 @@ from yjy_agent_runtime.domain import (
     ToolResult,
 )
 
-
+# 这算是第一道闸门，就是防止、拒绝追加单独的一个Tool。
 def reject_standalone_tool_message(message: Message) -> None:
     """拒绝单独追加的 TOOL 消息。
 
@@ -33,7 +33,7 @@ def reject_standalone_tool_message(message: Message) -> None:
             "tool messages must be appended together with their tool interaction"
         )
 
-
+# 这是第二道闸门，就是防止挡住调用消息和结果，也就是不是同一次交互。
 def validate_tool_interaction(
     call: ToolCall,
     result: ToolResult,
@@ -57,7 +57,7 @@ def ensure_unique_call_id(session: Session, call: ToolCall) -> None:
     if any(existing.call_id == call.call_id for existing in session.tool_calls):
         raise ValueError(f"tool call id already exists in session: {call.call_id}")
 
-
+# 第三道闸门：挡住读回来的旧快照本身是残缺的
 def assert_tool_interactions_consistent(session: Session) -> None:
     """检查快照里的工具交互是否完整：调用 ID 唯一，消息必须能对上调用与结果。"""
 

@@ -1,4 +1,4 @@
-"""具有严格 Session 隔离的进程内存储。"""
+"""具有严格 Session 隔离的进程内存储。这个也是我主要用于测试还有就是两个实现互相验证"""
 
 from threading import RLock
 
@@ -25,7 +25,7 @@ class InMemorySessionStore:
     """以不可变快照保存 Session，避免状态引用在 Session 间泄漏。"""
 
     def __init__(self) -> None:
-        self._sessions: dict[str, Session] = {}
+        self._sessions: dict[str, Session] = {} # 存不可变快照的引用
         self._lock = RLock()
 
     def get(self, session_id: str) -> Session | None:

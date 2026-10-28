@@ -33,7 +33,7 @@ def _contains_surrogate(value: str) -> bool:
     return any(0xD800 <= ord(char) <= 0xDFFF for char in value)
 
 
-def _ensure_no_surrogates(value: str, label: str) -> None:
+def _ensure_no_surrogates(value: str, label: str) -> None: # 输入的不是合法的文本 才会需要用到 对抗性审查的时候暴露出的问题
     if _contains_surrogate(value):
         raise ValueError(f"{label} must not contain unicode surrogates")
 
@@ -95,18 +95,18 @@ class Message:
     原地修改，历史就可能被某一轮循环悄悄改写，Trace 和实际输入会对不上。
     """
 
-    role: MessageRole
-    content: str
+    role: MessageRole # 消息是谁说的
+    content: str  # 说了啥 这个地方其实我在`builder.py:558` 的 `render_tool_envelope` 有进行一个处理
     # tool_call_id 只在 TOOL 角色时有意义，用于把工具结果对回某次调用。
     tool_call_id: str | None = None
 
     def __post_init__(self) -> None:
         if not self.content:
             raise ValueError("message content must not be empty")
-        _ensure_no_surrogates(self.content, "message content")
+        _ensure_no_surrogates(self.content, "message content") # 这个算是我当时踩的一个坑 因为使用的是cli 终端通常默认以 UTF-8 编码来显示文本。UTF-8 是一种变长编码，规定了某些字节必须成对或成组出现。# 如果终端里输出了一些奇怪的东西（比如把二进制文件 cat 到了终端里、或者混入了 GBK 编码的文本、网络传输丢包破坏了字节），就会出现无法被 UTF-8 规则解析的野字节（通常在 0x80 到 0xFF 之间）
         if self.role is MessageRole.TOOL and not self.tool_call_id:
             raise ValueError("tool message requires tool_call_id")
-        if self.role is not MessageRole.TOOL and self.tool_call_id is not None:
+        if self.role is not MessageRole.TOOL and self.tool_call_id is not None: # 这个地方算是一个反向约束 只写前半条，就会出现 USER 消息带着 call_id 的脏数据
             raise ValueError("only tool message may contain tool_call_id")
 
 
@@ -180,7 +180,7 @@ class ToolResultStatus(StrEnum):
     ERROR = "error"
 
 
-class TimeoutSemantics(StrEnum):
+class TimeoutSemantics(StrEnum): # 三种超时语义
     """一次工具执行的超时语义。
 
     ``join(timeout)`` 只能停止等待，不能停止线程。把“等待超时”当成“执行已取消”
@@ -193,10 +193,10 @@ class TimeoutSemantics(StrEnum):
     - ``COOPERATIVE``：有副作用的工具实现了协作式截止时间，超时后会在写入前
       检查截止时间并放弃提交，因此“已报告超时”与“稍后仍然写入”不会同时发生。
     """
-
-    SYNCHRONOUS = "synchronous"
-    ABANDONED_SAFE = "abandoned_safe"
-    COOPERATIVE = "cooperative"
+    # 它没有自欺欺人地认为“只要设了超时，任务就一定被取消了”。它诚实面对了 Python 无法强杀线程的缺陷，把“只读工具”、“能自我取消的工具”和“无法取消的危险工具”严格区分对待
+    SYNCHRONOUS = "synchronous" # 傻憨憨工具：有副作用且不配合 就比如发邮件这种 它会产生副作用，我们又杀不死它，它又不会自己看闹钟 所以这种 我们就不开新线程直接主线程同步执行 宁可慢一点
+    ABANDONED_SAFE = "abandoned_safe" # 我觉得用自己的话讲就是被抛弃也没事 无副作用的工具
+    COOPERATIVE = "cooperative" # 听话的工具：有副作用但会自我节制 比如写数据库 但是接受一个dealine 双方协作 杜绝超时后又在后台偷偷写入的幽灵问题
 
 
 @dataclass(frozen=True, slots=True)
@@ -226,26 +226,25 @@ class ToolResult:
 @dataclass(frozen=True, slots=True)
 class Session:
     """一个 Session 的完整、不可变状态快照。"""
-
+    # 这个地方为什么没有把tool call和tool result直接塞到我们的一个assistant message里面？是因为普通写法的话，可能是逐个执行、逐个写结果。
+    # 我这里担心的是：你执行到第二个的时候，进程可能被skill了。那么磁盘上就会有一条声称，说调用了三个工具，但结果只有一个。然后下一轮读回来，模型说我要调用C2、C3，但是没有结果，它就只能瞎猜。
     session_id: str
     messages: tuple[Message, ...] = ()
     tool_calls: tuple[ToolCall, ...] = ()
     tool_results: tuple[ToolResult, ...] = ()
-    todos: tuple[str, ...] = ()
-    summary: SessionSummary | None = None
+    todos: tuple[str, ...] = () # 工具是无状态的，状态必须挂在 Session 上才能隔离
+    summary: SessionSummary | None = None # 历史压缩的摘要 + 覆盖范围 所以，这也是为什么要包一层的原因，而不是说只是一个字符串。
 
     def __post_init__(self) -> None:
         if not self.session_id:
             raise ValueError("session id must not be empty")
         # 摘要的覆盖范围不能超过真实消息数：这是“压缩元数据”和“历史”之间
         # 最重要的一致性约束，能挡住 covered 被错误推进导致的丢历史。
-        if self.summary is not None and self.summary.covered_message_count > len(
-            self.messages
-        ):
+        # 这个断言也就是说，你可能summarize之后的内容，是不可能超过我们当前发生的事情的。比如说，当前我可能跟你聊了10轮，但是你说你总结了15轮，那是不是有问题？
+        if self.summary is not None and self.summary.covered_message_count > len(self.messages):
             raise ValueError(
                 "summary cannot cover more messages than the session contains"
             )
-
 
 class TerminationReason(StrEnum):
     """Agent Loop 所有受控终止出口。"""

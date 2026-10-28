@@ -30,9 +30,9 @@ class ToolDefinition:
     基建的 Context 与 Tool 实现就都只依赖抽象，不会互相绑定。
     """
 
-    name: str
-    description: str
-    parameters: Mapping[str, Any] = field(default_factory=dict)
+    name: str # 注册表（唯一键）、模型（调用时填）
+    description: str # 这是模型判断"该不该用这个工具"的唯一依据
+    parameters: Mapping[str, Any] = field(default_factory=dict) # 模型（生成参数）、执行器（校验）
     has_side_effects: bool = False
 
     def __post_init__(self) -> None:
@@ -55,12 +55,12 @@ class Tool(Protocol):
     工具额外实现 `invoke_with_session`，由执行器显式传入 `session_id`。
     """
 
-    @property
+    @property # 大多数工具的 definition 是常量，用 property 可以让类属性 `_definition` 只构造一次，而不是每个实例一份。
     def definition(self) -> ToolDefinition:
         """返回用于注册和模型暴露的工具定义。"""
         ...
 
-    def invoke(self, arguments: Mapping[str, Any]) -> str:
+    def invoke(self, arguments: Mapping[str, Any]) -> str: # **为什么 `invoke` 只收 `arguments`，不收 `session_id`？**因为大多数工具不需要会话。只有todo 需要——它要读写当前会话的待办。所以`todo` 额外实现了 `invoke_with_session(session_id, arguments)`，执行器用`hasattr` 探测（`executor.py:150`）。
         """使用已经过校验的参数执行工具。"""
         ...
 
@@ -71,7 +71,7 @@ class ContextProvider(Protocol):
     def build(
         self,
         request: RunRequest,
-        tool_results: Sequence[ToolResult],
+        tool_results: Sequence[ToolResult],# 因为本轮刚执行完的工具结果还没被下一轮读到——虽然循环已经把它写进 Session 了，但传一份显式的可以让 Context 实现不必重新扫全量历史。下游（`LLMClient.decide`）只接受 `Sequence[Message]`。中间多一个对象，就要多一次转换。
     ) -> Sequence[Message]:
         """返回当前 Session 本轮需要发送给模型的消息。"""
         ...
@@ -124,7 +124,7 @@ class SessionStore(Protocol):
         """
         ...
 
-    def append_tool_interaction(
+    def append_tool_interaction( # 这个地方也只是一个接口 去实现 具体在session下面的 file文件 90行
         self,
         session_id: str,
         call: ToolCall,

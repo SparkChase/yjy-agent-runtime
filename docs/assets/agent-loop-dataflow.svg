@@ -1,0 +1,82 @@
+<svg viewBox="0 0 680 600" width="100%" role="img" xmlns="http://www.w3.org/2000/svg" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif">
+<title>Agent Loop 的数据流与三个落盘点</title>
+<desc>用户输入先写入 Session，每轮从 Session 构建 Context、调用模型、分派决策；最终回答写回 Session 后返回，或执行工具并原子写回后回到构建 Context。</desc>
+<defs>
+<marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+<path d="M2 1L8 5L2 9" fill="none" stroke="#888780" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+</marker>
+<marker id="arrow-green" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+<path d="M2 1L8 5L2 9" fill="none" stroke="#3B6D11" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+</marker>
+</defs>
+
+<text x="40" y="24" font-size="13" font-weight="500" fill="#2C2C2A">Agent Loop 一次 run() 的完整数据流</text>
+
+<g>
+<rect x="150" y="44" width="270" height="56" rx="10" fill="#F1EFE8" stroke="#888780" stroke-width="0.5"/>
+<text x="285" y="64" text-anchor="middle" dominant-baseline="central" font-size="14" font-weight="500" fill="#2C2C2A">用户输入</text>
+<text x="285" y="82" text-anchor="middle" dominant-baseline="central" font-family="Menlo, Consolas, monospace" font-size="11.5" fill="#5F5E5A">cli.py:234 → loop.run()</text>
+</g>
+
+<g>
+<rect x="150" y="126" width="270" height="56" rx="10" fill="#FCEBEB" stroke="#A32D2D" stroke-width="0.5"/>
+<text x="285" y="146" text-anchor="middle" dominant-baseline="central" font-size="14" font-weight="500" fill="#501313">落盘① 用户消息</text>
+<text x="285" y="164" text-anchor="middle" dominant-baseline="central" font-family="Menlo, Consolas, monospace" font-size="11.5" fill="#A32D2D">loop.py:150 → :151</text>
+</g>
+
+<g>
+<rect x="150" y="208" width="270" height="56" rx="10" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
+<text x="285" y="228" text-anchor="middle" dominant-baseline="central" font-size="14" font-weight="500" fill="#0C447C">构建 Context</text>
+<text x="285" y="246" text-anchor="middle" dominant-baseline="central" font-family="Menlo, Consolas, monospace" font-size="11.5" fill="#185FA5">loop.py:178 → builder.py:196</text>
+</g>
+
+<g>
+<rect x="150" y="290" width="270" height="56" rx="10" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
+<text x="285" y="310" text-anchor="middle" dominant-baseline="central" font-size="14" font-weight="500" fill="#0C447C">调用模型</text>
+<text x="285" y="328" text-anchor="middle" dominant-baseline="central" font-family="Menlo, Consolas, monospace" font-size="11.5" fill="#185FA5">loop.py:229 decide(messages)</text>
+</g>
+
+<g>
+<rect x="150" y="372" width="270" height="56" rx="10" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
+<text x="285" y="392" text-anchor="middle" dominant-baseline="central" font-size="14" font-weight="500" fill="#0C447C">决策分派</text>
+<text x="285" y="410" text-anchor="middle" dominant-baseline="central" font-family="Menlo, Consolas, monospace" font-size="11.5" fill="#185FA5">loop.py:255 / :283</text>
+</g>
+
+<g>
+<rect x="150" y="454" width="270" height="56" rx="10" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.5"/>
+<text x="285" y="474" text-anchor="middle" dominant-baseline="central" font-size="14" font-weight="500" fill="#412402">执行工具 → 落盘②</text>
+<text x="285" y="492" text-anchor="middle" dominant-baseline="central" font-family="Menlo, Consolas, monospace" font-size="11.5" fill="#854F0B">loop.py:334 → :359</text>
+</g>
+
+<g>
+<rect x="432" y="126" width="228" height="56" rx="10" fill="#FFFFFF" stroke="#A32D2D" stroke-width="0.5" stroke-dasharray="3 3"/>
+<text x="546" y="146" text-anchor="middle" dominant-baseline="central" font-size="13" font-weight="500" fill="#501313">磁盘 · +1 条 USER 消息</text>
+<text x="546" y="164" text-anchor="middle" dominant-baseline="central" font-family="Menlo, Consolas, monospace" font-size="11.5" fill="#A32D2D">{session_id}.json</text>
+</g>
+
+<g>
+<rect x="432" y="372" width="228" height="56" rx="10" fill="#EAF3DE" stroke="#3B6D11" stroke-width="0.5"/>
+<text x="546" y="392" text-anchor="middle" dominant-baseline="central" font-size="13" font-weight="500" fill="#173404">出口一 · 最终回答</text>
+<text x="546" y="410" text-anchor="middle" dominant-baseline="central" font-size="12" fill="#3B6D11">③ 先落盘，再 return RunResult</text>
+</g>
+
+<g>
+<rect x="432" y="454" width="228" height="56" rx="10" fill="#FFFFFF" stroke="#854F0B" stroke-width="0.5" stroke-dasharray="3 3"/>
+<text x="546" y="474" text-anchor="middle" dominant-baseline="central" font-size="13" font-weight="500" fill="#412402">磁盘 · +3 条，一次写入</text>
+<text x="546" y="492" text-anchor="middle" dominant-baseline="central" font-family="Menlo, Consolas, monospace" font-size="11.5" fill="#854F0B">call + result + TOOL</text>
+</g>
+
+<path d="M285 100 L285 122" fill="none" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+<path d="M285 182 L285 204" fill="none" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+<path d="M285 264 L285 286" fill="none" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+<path d="M285 346 L285 368" fill="none" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+<path d="M285 428 L285 450" fill="none" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+<path d="M420 400 L428 400" fill="none" stroke="#3B6D11" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+
+<path d="M150 482 L96 482 L96 236 L146 236" fill="none" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text x="88" y="360" text-anchor="end" dominant-baseline="central" font-size="11" fill="#5F5E5A">每轮重建</text>
+
+<path d="M40 540 L640 540" fill="none" stroke="#B4B2A9" stroke-width="0.5"/>
+<text x="40" y="560" font-size="12.5" fill="#2C2C2A">①②③ 是三次落盘：用户消息 → 工具交互（三者一次原子写）→ 最终回答。</text>
+<text x="40" y="580" font-size="12.5" fill="#5F5E5A">循环体自己不留任何状态，每轮都从 Session 读回来重建。</text>
+</svg>

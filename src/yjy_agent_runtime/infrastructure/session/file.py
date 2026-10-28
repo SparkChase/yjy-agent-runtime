@@ -40,15 +40,15 @@ class JsonFileSessionStore:
         self._directory.mkdir(parents=True, exist_ok=True)
         self._lock = RLock()
 
-    def get(self, session_id: str) -> Session | None:
+    def get(self, session_id: str) -> Session | None: # 一次读取
         self._validate_session_id(session_id)
         path = self._path_for(session_id)
         if not path.exists():
             return None
         with self._lock:
             try:
-                payload = json.loads(path.read_text(encoding="utf-8"))
-                session = self._decode_session(payload, expected_id=session_id)
+                payload = json.loads(path.read_text(encoding="utf-8")) # 这个意思就是说，字符串变成dict。
+                session = self._decode_session(payload, expected_id=session_id) # 这个是Dict变成Section，也就是逐条重建Message、To a Call和To a Result。
             except SessionStorageError:
                 raise
             except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError) as error:
@@ -58,8 +58,8 @@ class JsonFileSessionStore:
             # 读取时再做一次一致性检查：旧版本可能留下过“半条工具交互”的快照，
             # 这种历史一旦进入 Context，模型会看到有结果没调用、或有调用没结果。
             try:
-                assert_tool_interactions_consistent(session)
-            except ValueError as error:
+                assert_tool_interactions_consistent(session) # 闸门3
+            except ValueError as error: # 如果闸门三失败，就会包装成这个SessionStorageError，然后不会让一条残缺的历史进入我们的context。
                 raise SessionStorageError(
                     f"session snapshot has an incomplete tool interaction: {session_id}"
                 ) from error
@@ -74,7 +74,7 @@ class JsonFileSessionStore:
         return session
 
     def append_message(self, session_id: str, message: Message) -> Session:
-        reject_standalone_tool_message(message)
+        reject_standalone_tool_message(message) # 第一道闸门
         current = self._require(session_id)
         updated = Session(
             session_id=session_id,
@@ -101,18 +101,19 @@ class JsonFileSessionStore:
         写入后的完整快照，不会出现只有其中一部分的半条交互。
         """
 
-        validate_tool_interaction(call, result, message)
-        current = self._require(session_id)
-        ensure_unique_call_id(current, call)
-        updated = Session(
+        validate_tool_interaction(call, result, message) # 这个相当于是一道闸门，保证我们的call、result和message进行相互指认。
+        current = self._require(session_id) # 这个函数的功能就是去读当前的快照。
+        ensure_unique_call_id(current, call) # 这就是一个校验：我们的call id不能重复。
+        updated = Session( # 这一步就是构造一个新的session：三个位置都各追加一项，其余原样带过来。
             session_id=session_id,
-            messages=(*current.messages, message),
-            tool_calls=(*current.tool_calls, call),
-            tool_results=(*current.tool_results, result),
+            messages=(*current.messages, message), # 追加
+            tool_calls=(*current.tool_calls, call), # 追加
+            tool_results=(*current.tool_results, result), # 追加
             todos=current.todos,
             summary=current.summary,
-        )
-        self._save(updated)
+        ) # 其实，这个解包current.x y就是在同一个表达式里面，这就是原子在代码层面的一个样子了。就不存在先追加一、再追加二这样的中间状态，因为整个section是一次性构造出来的新对象，因为frozen等于True。
+        # 这个地方还可以另外说一下：为什么不直接用append，而是这样来做？首先就是因为Tuple它是不可变的，然后没有这个append方法。还有就是因为这个就是函数式编程里面的不可变数据的一个设计的方法。就是说原对象永远都不动，每次有新消息都复制上一份，生成一个全新的快照。
+        self._save(updated) # 然后这个步骤的话，就是写临时文件嘛。
         return updated
 
     def set_summary(self, session_id: str, summary: SessionSummary | None) -> Session:
@@ -174,7 +175,7 @@ class JsonFileSessionStore:
                     temporary.flush()
                     os.fsync(temporary.fileno())
                     temporary_path = temporary.name
-                os.replace(temporary_path, path)
+                os.replace(temporary_path, path) # 这个是一个原子替换。
             except OSError as error:
                 if temporary_path:
                     try:
@@ -198,7 +199,7 @@ class JsonFileSessionStore:
             raise ValueError("session id must not be empty")
 
     @staticmethod
-    def _encode_session(session: Session) -> dict[str, Any]:
+    def _encode_session(session: Session) -> dict[str, Any]: # session对象->dict
         return {
             "session_id": session.session_id,
             "messages": [
@@ -244,7 +245,7 @@ class JsonFileSessionStore:
         }
 
     @staticmethod
-    def _decode_session(payload: Any, *, expected_id: str) -> Session:
+    def _decode_session(payload: Any, *, expected_id: str) -> Session: # dict->session对象
         if not isinstance(payload, dict) or payload.get("session_id") != expected_id:
             raise SessionStorageError("session snapshot has an invalid session id")
         messages = tuple(

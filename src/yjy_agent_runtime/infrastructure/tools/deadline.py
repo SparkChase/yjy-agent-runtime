@@ -23,7 +23,8 @@ class Deadline:
     def __init__(self, timeout_seconds: float) -> None:
         if timeout_seconds <= 0:
             raise ValueError("deadline timeout must be positive")
-        self._expires_at = monotonic() + timeout_seconds
+        self._expires_at = monotonic() + timeout_seconds # 这个地方也很妙 time.time() 获取的是墙上挂钟时间（Wall Clock）。电脑如果联网同步时间（NTP 校时），或者跨时区/夏令时调整，时钟可能突然“向前跳 1 秒”或“向后倒退 5 秒”。如果倒退了，你的超时判断就永远不会触发了
+        # time.monotonic() 是单调时钟（严格按物理流逝只增不减的秒表），永远不会倒流。做超时、耗时统计必须用 monotonic()。
 
     @property
     def expired(self) -> bool:
@@ -36,7 +37,7 @@ class Deadline:
 
         return max(0.0, self._expires_at - monotonic())
 
-    def raise_if_expired(self) -> None:
+    def raise_if_expired(self) -> None: # **工具在真正产生外部副作用之前，必须调用 `raise_if_expired()`。**这样"执行器已经报告超时"和"工具稍后又写了一次"就不会同时发生
         """在提交副作用之前调用；已过期则抛出 ``TimeoutError`` 放弃写入。"""
 
         if self.expired:
